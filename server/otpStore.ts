@@ -183,10 +183,7 @@ export function verifyChallengeToken(
   }
 }
 
-const RTDB_URL = (
-  process.env.FIREBASE_DATABASE_URL ||
-  'https://prople-store-3efed-default-rtdb.firebaseio.com'
-).replace(/\/$/, '');
+const RTDB_URL = (process.env.DATABASE_URL || '').replace(/\/$/, '');
 
 function getOtpKey(email: string): string {
   // Safe Firebase RTDB key by base64 encoding normalized email
@@ -370,47 +367,7 @@ export async function persistUserPasswordHash(email: string, hash: string): Prom
     console.warn('[Local Password Store] Write notice:', err?.message || err);
   }
 
-  // 2. Authoritative Firestore persistence
-  if (otpStoreDb) {
-    try {
-      const { doc, setDoc, collection, query, where, getDocs, limit } = await import('firebase/firestore');
-      const key = getOtpKey(norm);
-      const credDocRef = doc(otpStoreDb, 'auth_credentials', key);
-      await setDoc(credDocRef, {
-        email: norm,
-        hash,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
 
-      // Also mirror to user document in users collection if present
-      const usersCol = collection(otpStoreDb, 'users');
-      const q = query(usersCol, where('email', '==', norm), limit(1));
-      const userSnap = await getDocs(q);
-      if (!userSnap.empty) {
-        const uDoc = userSnap.docs[0];
-        await setDoc(doc(otpStoreDb, 'users', uDoc.id), {
-          passwordHash: hash,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      }
-    } catch (fsErr: any) {
-      console.warn('[Distributed Password Store] Firestore write notice:', fsErr?.message || fsErr);
-    }
-  }
-
-  // 3. Realtime Database fallback
-  try {
-    const key = getOtpKey(norm);
-    const url = `${RTDB_URL}/_auth_otps/pwd_${key}.json`;
-    await fetch(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hash, updatedAt: Date.now() }),
-      signal: AbortSignal.timeout(4000),
-    });
-  } catch (err: any) {
-    // Graceful RTDB notice
-  }
 }
 
 /**
@@ -430,53 +387,6 @@ export async function getUserPasswordHash(email: string): Promise<string | null>
       return creds[norm].hash;
     }
   } catch {}
-
-  // 2. Authoritative Firestore lookup from auth_credentials
-  if (otpStoreDb) {
-    try {
-      const { doc, getDoc, collection, query, where, getDocs, limit } = await import('firebase/firestore');
-      const key = getOtpKey(norm);
-      const credDocRef = doc(otpStoreDb, 'auth_credentials', key);
-      const credSnap = await getDoc(credDocRef);
-      if (credSnap.exists()) {
-        const data = credSnap.data();
-        if (data && typeof data.hash === 'string' && data.hash.includes(':')) {
-          passwordMemoryStore.set(norm, data.hash);
-          return data.hash;
-        }
-      }
-
-      // Check users collection for passwordHash field
-      const usersCol = collection(otpStoreDb, 'users');
-      const q = query(usersCol, where('email', '==', norm), limit(1));
-      const userSnap = await getDocs(q);
-      if (!userSnap.empty) {
-        const uData = userSnap.docs[0].data();
-        if (uData && typeof uData.passwordHash === 'string' && uData.passwordHash.includes(':')) {
-          passwordMemoryStore.set(norm, uData.passwordHash);
-          return uData.passwordHash;
-        }
-      }
-    } catch (fsErr: any) {
-      console.warn('[Distributed Password Store] Firestore read notice:', fsErr?.message || fsErr);
-    }
-  }
-
-  // 3. Realtime Database fallback lookup
-  try {
-    const key = getOtpKey(norm);
-    const url = `${RTDB_URL}/_auth_otps/pwd_${key}.json`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && typeof data === 'object' && data.hash) {
-        passwordMemoryStore.set(norm, data.hash);
-        return data.hash;
-      }
-    }
-  } catch (err: any) {
-    // Graceful RTDB notice
-  }
 
   return null;
 }

@@ -1,16 +1,4 @@
 import type express from 'express';
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  limit,
-  where
-} from 'firebase/firestore';
 import { isStrictAdminEmail, verifySecuritySecret } from './securityDefense.ts';
 
 /**
@@ -86,47 +74,8 @@ setInterval(() => {
 
 let isInitialized = false;
 
-/**
- * Initializes security cache from Firestore to preserve rate-limits and locked IPs across server restarts
- */
-export async function initAuthSecurity(db: any) {
-  if (isInitialized || !db) return;
-  try {
-    // 1. Load locked IPs
-    try {
-      const lockedSnap = await getDocs(collection(db, 'locked_ips'));
-      lockedSnap.forEach((d) => {
-        const data = d.data();
-        if (data?.ip) lockedIps.add(data.ip.trim());
-        else if (d.id) lockedIps.add(d.id.trim());
-      });
-      console.log(`[Auth Security] Loaded ${lockedIps.size} locked IP(s) from database.`);
-    } catch (ipErr: any) {
-      console.warn('[Auth Security] Locked IPs state notice:', ipErr.message);
-    }
-
-    // 2. Load recent IP strikes
-    try {
-      const stateDoc = await getDoc(doc(db, 'auth_security_state', 'active_ip_strikes'));
-      if (stateDoc.exists()) {
-        const data = stateDoc.data() || {};
-        for (const [ip, count] of Object.entries(data)) {
-          if (typeof count === 'number') {
-            ipTotalStrikes.set(ip, count);
-            if (count > MAX_IP_STRIKES_BEFORE_LOCK) {
-              lockedIps.add(ip);
-            }
-          }
-        }
-      }
-    } catch (stateErr: any) {
-      console.warn('[Auth Security] IP strikes state notice:', stateErr.message);
-    }
-
-    isInitialized = true;
-  } catch (err: any) {
-    console.warn('[Auth Security] Security initialization notice:', err.message);
-  }
+export async function initAuthSecurity(_db?: any) {
+  isInitialized = true;
 }
 
 /**
@@ -347,42 +296,6 @@ export async function registerFailedSecurityEvent(
     lockedIps.add(ip);
     isNowLocked = true;
     console.warn(`[Auth Security] 🚨 IP ${ip} EXCEEDED ${MAX_IP_STRIKES_BEFORE_LOCK} FAILED STRIKES. IP IS NOW LOCKED FOR LOGIN.`);
-
-    // Persist locked IP to Firestore
-    if (db) {
-      try {
-        const safeDocId = ip.replace(/[\/\.#$\[\]:]/g, '_');
-        await setDoc(doc(db, 'locked_ips', safeDocId), {
-          ip,
-          lockedAt: now,
-          lockedAtIso: new Date(now).toISOString(),
-          reason: `Exceeded ${MAX_IP_STRIKES_BEFORE_LOCK} failed security verification attempts (password/OTP)`,
-          strikeCount: currentStrikes,
-          lastTargetEmail: cleanEmail,
-          userAgent: entry.userAgent || 'unknown',
-        });
-      } catch (err: any) {
-        console.warn('[Auth Security] Failed to save locked IP to Firestore:', err.message);
-      }
-    }
-  }
-
-  // Persist the individual failed log in Firestore collection `auth_failed_logs`
-  if (db) {
-    try {
-      const logId = `${now}_${Math.random().toString(36).substring(2, 9)}`;
-      await setDoc(doc(db, 'auth_failed_logs', logId), fullEntry);
-
-      // Periodically update active strikes aggregate
-      const safeIpKey = ip.replace(/[\/\.#$\[\]:]/g, '_');
-      await setDoc(
-        doc(db, 'auth_security_state', 'active_ip_strikes'),
-        { [safeIpKey]: currentStrikes, lastUpdated: now },
-        { merge: true }
-      );
-    } catch (dbErr: any) {
-      console.warn('[Auth Security] Failed to log failure to Firestore:', dbErr.message);
-    }
   }
 
   return {
@@ -423,20 +336,6 @@ export async function unlockIp(
   ipFailedLoginTimestamps.delete(cleanIp);
   ipOtpTimestamps.delete(cleanIp);
 
-  if (db) {
-    try {
-      const safeDocId = cleanIp.replace(/[\/\.#$\[\]:]/g, '_');
-      await deleteDoc(doc(db, 'locked_ips', safeDocId));
-      await setDoc(
-        doc(db, 'auth_security_state', 'active_ip_strikes'),
-        { [safeDocId]: 0, lastUpdated: Date.now() },
-        { merge: true }
-      );
-    } catch (err: any) {
-      console.warn('[Auth Security] Failed to remove locked IP from database:', err.message);
-    }
-  }
-
   console.log(`[Auth Security] IP ${cleanIp} successfully unlocked by authorized administrator/key.`);
   return { success: true };
 }
@@ -448,7 +347,7 @@ export async function unlockIp(
 export async function resetIpStrikes(
   ip: string,
   authSecretOrAdminEmail?: string,
-  db?: any
+  _db?: any
 ): Promise<{ success: boolean; error?: string }> {
   const isAuth =
     verifySecuritySecret(authSecretOrAdminEmail) ||
@@ -465,17 +364,6 @@ export async function resetIpStrikes(
   ipTotalStrikes.delete(cleanIp);
   ipFailedLoginTimestamps.delete(cleanIp);
 
-  if (db) {
-    try {
-      const safeDocId = cleanIp.replace(/[\/\.#$\[\]:]/g, '_');
-      await setDoc(
-        doc(db, 'auth_security_state', 'active_ip_strikes'),
-        { [safeDocId]: 0, lastUpdated: Date.now() },
-        { merge: true }
-      );
-    } catch {}
-  }
-
   return { success: true };
 }
 
@@ -485,7 +373,7 @@ export async function resetIpStrikes(
  */
 export async function clearAllLockedIps(
   authSecret: string,
-  db?: any
+  _db?: any
 ): Promise<{ success: boolean; count: number; error?: string }> {
   if (!verifySecuritySecret(authSecret)) {
     return {
@@ -499,29 +387,17 @@ export async function clearAllLockedIps(
   lockedIps.clear();
   ipTotalStrikes.clear();
 
-  if (db) {
-    try {
-      const lockedSnap = await getDocs(collection(db, 'locked_ips'));
-      for (const d of lockedSnap.docs) {
-        await deleteDoc(d.ref).catch(() => {});
-      }
-    } catch (err: any) {
-      console.warn('[Auth Security] Failed to clear locked IPs from database:', err.message);
-    }
-  }
-
   return { success: true, count };
 }
 
 /**
  * Immediately locks a hostile IP address detected by intrusion defense or honeypot traps.
- * Enforces immediate ban strikes and persists permanent ban to Firestore.
  */
 export async function lockHostileIp(
   ip: string,
   reason: string,
-  details?: { attackType?: string; payload?: string; userAgent?: string },
-  db?: any
+  _details?: { attackType?: string; payload?: string; userAgent?: string },
+  _db?: any
 ): Promise<void> {
   const cleanIp = (ip || '').replace('::ffff:', '').replace(/[^0-9a-fA-F:.]/g, '').slice(0, 64);
   if (!cleanIp || cleanIp === 'unknown' || cleanIp === '127.0.0.1' || cleanIp === '::1' || cleanIp === 'localhost') return;
@@ -529,37 +405,6 @@ export async function lockHostileIp(
   lockedIps.add(cleanIp);
   ipTotalStrikes.set(cleanIp, (ipTotalStrikes.get(cleanIp) || 0) + 100);
 
-  const now = Date.now();
   console.warn(`[Intrusion Shield] 🚨 HOSTILE PROBE LOCKED from IP ${cleanIp}: ${reason}`);
-
-  if (db) {
-    try {
-      const safeDocId = cleanIp.replace(/[\/\.#$\[\]:]/g, '_');
-      await setDoc(doc(db, 'locked_ips', safeDocId), {
-        ip: cleanIp,
-        lockedAt: now,
-        lockedAtIso: new Date(now).toISOString(),
-        reason,
-        strikeCount: 100,
-        attackType: details?.attackType || 'intrusion_probe',
-        payloadSnippet: (details?.payload || '').slice(0, 256),
-        userAgent: details?.userAgent || 'unknown',
-        permanentBan: true,
-      });
-
-      const forensicId = `attack_${now}_${Math.random().toString(36).substring(2, 8)}`;
-      await setDoc(doc(db, 'security_forensics', forensicId), {
-        ip: cleanIp,
-        timestamp: now,
-        isoTime: new Date(now).toISOString(),
-        reason,
-        attackType: details?.attackType || 'intrusion_probe',
-        payload: (details?.payload || '').slice(0, 512),
-        userAgent: details?.userAgent || 'unknown',
-      });
-    } catch (e: any) {
-      console.warn('[Intrusion Shield] Firestore persistence notice:', e?.message || e);
-    }
-  }
 }
 

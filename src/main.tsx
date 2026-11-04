@@ -47,11 +47,17 @@ try {
     try { localStorage.removeItem(key); } catch {}
   });
 
-  // Clean only invalid 'undefined' or 'null' literal strings
-  const preservedName = localStorage.getItem('prople_preserved_claimed_name');
-  if (preservedName && ['undefined', 'null'].includes(preservedName.trim().toLowerCase())) {
-    localStorage.removeItem('prople_preserved_claimed_name');
-  }
+  // Purge any stale unauthenticated or guest profiles from previous sessions
+  try {
+    const rawUser = localStorage.getItem('appmarket_user_profile');
+    if (rawUser) {
+      const parsed = JSON.parse(rawUser);
+      if (!parsed || !parsed.email || !parsed.email.includes('@')) {
+        localStorage.removeItem('appmarket_user_profile');
+        localStorage.removeItem('prople_preserved_claimed_name');
+      }
+    }
+  } catch {}
 } catch {}
 
 // Purge any stale Workbox/PWA precaches in CacheStorage

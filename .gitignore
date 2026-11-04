@@ -15,4 +15,8 @@ public/assets/aistudio/
 *.tempmediaStorage
 server/data/
 server/index.built.html
-
+firebase-applet-config.json
+firebase_applet_config.xml
+.env
+.env.local
+.env.production

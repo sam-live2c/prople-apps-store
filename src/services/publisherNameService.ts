@@ -572,8 +572,16 @@ export function getPreservedClaimedName(): string {
   return '';
 }
 
+export function clearPreservedClaimedName(): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(PRESERVED_CLAIMED_NAME_KEY);
+    }
+  } catch {}
+}
+
 /**
- * Persists a claimed publisher name into localStorage so it survives logout and guest sessions
+ * Persists a claimed publisher name into localStorage for the active authenticated session
  */
 export function setPreservedClaimedName(name: string): void {
   try {
@@ -581,7 +589,7 @@ export function setPreservedClaimedName(name: string): void {
       const clean = (name || '').trim();
       if (clean) {
         const lower = clean.toLowerCase();
-        if (lower !== 'undefined' && lower !== 'null') {
+        if (lower !== 'undefined' && lower !== 'null' && lower !== 'user') {
           localStorage.setItem(PRESERVED_CLAIMED_NAME_KEY, clean);
           return;
         }

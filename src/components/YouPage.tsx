@@ -170,21 +170,15 @@ export default function YouPage({ onAppClick, onOpenNotifications }: { onAppClic
     return () => clearTimeout(timer);
   }, [isAuthLoading, user, activeView, showToast, hasActiveToast]);
 
-  const rawPreserved = getPreservedClaimedName();
-  const isExcludedName = (n?: string | null) => {
-    if (!n) return true;
-    const l = n.trim().toLowerCase();
-    return l === 'undefined' || l === 'null';
-  };
-  const preservedClaimedName = !isExcludedName(rawPreserved) ? rawPreserved.trim() : '';
-  const userEmail = user?.email || "User";
+  const userEmail = user?.email || "";
   const userGreetingName = getFriendlyDisplayName(user);
-  const userName = user?.publisherName || user?.displayName || (preservedClaimedName && preservedClaimedName.toLowerCase() !== 'user' ? preservedClaimedName : '') || (user ? userGreetingName : (preservedClaimedName || "User"));
+  const userName = user ? (user.publisherName || user.displayName || userGreetingName || 'User') : '';
   const isUserVerifiedPublisher = Boolean(
-    user?.isVerifiedPublisher ||
-    (user?.publisherName && AdminModerationService.isPublisherVerified(user.publisherName)) ||
-    (user?.displayName && AdminModerationService.isPublisherVerified(user.displayName)) ||
-    (userName && AdminModerationService.isPublisherVerified(userName))
+    user && (
+      user.isVerifiedPublisher ||
+      (user.publisherName && AdminModerationService.isPublisherVerified(user.publisherName)) ||
+      (user.displayName && AdminModerationService.isPublisherVerified(user.displayName))
+    )
   );
 
   const handleGoogleSignIn = async () => {
@@ -632,32 +626,40 @@ export default function YouPage({ onAppClick, onOpenNotifications }: { onAppClic
               </h2>
               {isUserVerifiedPublisher && <VerifiedBadge size="md" />}
             </div>
+
+            {/* Quick Actions: Edit Profile & Sign Out */}
+            <div className="flex items-center justify-center gap-2.5 mt-3.5">
+              <button
+                type="button"
+                onClick={() => setActiveView('edit-profile')}
+                className="px-4 py-2 bg-theme-hover hover:bg-theme-active text-theme-text text-xs font-medium rounded-full transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <User className="w-3.5 h-3.5 text-theme-text-muted" />
+                <span>Edit profile</span>
+              </button>
+              <button
+                type="button"
+                id="you-card-signout-btn"
+                onClick={() => setShowLogoutConfirm(true)}
+                className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-red-400 text-xs font-medium rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign out</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="p-4 sm:p-5 bg-theme-card rounded-2xl shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5 min-w-0">
-              {userName && userName !== 'User' ? (
-                <UserAvatar 
-                  displayName={userName}
-                  size="md"
-                  className="shrink-0"
-                />
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-theme-hover border border-theme-border/60 flex items-center justify-center shrink-0">
-                  <User className="w-6 h-6 text-theme-text-muted" />
-                </div>
-              )}
+              <div className="w-12 h-12 rounded-full bg-theme-hover border border-theme-border/60 flex items-center justify-center shrink-0">
+                <User className="w-6 h-6 text-theme-text-muted" />
+              </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <h2 className="text-base sm:text-lg font-semibold text-theme-text truncate">
-                    {userName && userName !== 'User' ? `Hi, ${userName}!` : 'Sign in to Prople Store'}
-                  </h2>
-                  {userName && userName !== 'User' && isUserVerifiedPublisher && <VerifiedBadge size="sm" />}
-                </div>
+                <h2 className="text-base sm:text-lg font-semibold text-theme-text truncate">
+                  Sign in to Prople Store
+                </h2>
                 <p className="text-xs text-theme-text-muted line-clamp-1">
-                  {userName && userName !== 'User'
-                    ? 'Claimed profile • Sign in to sync across devices' 
-                    : 'Access developer tools, sync apps, and write reviews'}
+                  Access developer tools, sync apps, and write reviews
                 </p>
               </div>
             </div>

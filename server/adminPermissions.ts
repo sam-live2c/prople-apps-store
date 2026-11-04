@@ -1,13 +1,4 @@
-import { 
-  collection as serverCollection, 
-  doc as serverDoc, 
-  getDoc as serverGetDoc, 
-  getDocs as serverGetDocs, 
-  setDoc as serverSetDoc,
-  query as serverQuery,
-  where as serverWhere,
-  limit as serverLimit
-} from "firebase/firestore";
+import { getSupabaseAdminClient } from './supabase.ts';
 
 export type AdminAction =
   | 'DELETE_APP'
@@ -58,98 +49,13 @@ export const DEFAULT_ADMIN_EMAILS = [
 
 export const VERIFIED_ADMIN_DOMAIN = "@prople.co.in";
 
-// Cache dynamic admins in memory to maintain sub-millisecond response times
-let cachedAdmins = new Map<string, ServerAdminRecord>();
-let lastCacheSync = 0;
-const CACHE_TTL_MS = 60 * 1000; // 60 seconds TTL
-
-export async function syncAdminCacheFromFirestore(serverDb: any): Promise<void> {
-  if (!serverDb) return;
-  const now = Date.now();
-  if (now - lastCacheSync < CACHE_TTL_MS && cachedAdmins.size > 0) return;
-
-  try {
-    const adminsCol = serverCollection(serverDb, "admins");
-    const snap = await serverGetDocs(adminsCol);
-    const newMap = new Map<string, ServerAdminRecord>();
-
-    // Seed defaults
-    DEFAULT_ADMIN_EMAILS.forEach(email => {
-      newMap.set(email.toLowerCase().trim(), {
-        email: email.toLowerCase().trim(),
-        role: 'Store Administrator',
-        permissions: ALL_ADMIN_ACTIONS,
-        isActive: true,
-        grantedAt: new Date().toISOString()
-      });
-    });
-
-    snap.forEach(d => {
-      const data = d.data();
-      const idKey = d.id.toLowerCase().trim();
-      const extractedEmail = (
-        data.email || 
-        data.accountEmail || 
-        data.userEmail || 
-        (d.id.includes('@') ? d.id : '')
-      ).toLowerCase().trim();
-      const uid = (data.uid || (!d.id.includes('@') ? d.id : '')).trim();
-
-      const rec: ServerAdminRecord = {
-        uid: uid || undefined,
-        email: extractedEmail || idKey,
-        role: 'Store Administrator',
-        permissions: ALL_ADMIN_ACTIONS,
-        grantedAt: data.grantedAt || new Date().toISOString(),
-        isActive: data.isActive !== false
-      };
-
-      if (extractedEmail) newMap.set(extractedEmail, rec);
-      if (uid) newMap.set(uid, rec);
-      newMap.set(idKey, rec);
-      const sanitizedEmail = extractedEmail ? extractedEmail.replace(/[^a-zA-Z0-9_-]/g, '_') : '';
-      if (sanitizedEmail) newMap.set(sanitizedEmail, rec);
-    });
-
-    cachedAdmins = newMap;
-    lastCacheSync = now;
-  } catch (err: any) {
-    console.warn("[AdminPermissionsServer] Firestore sync notice:", err.message);
-  }
+export async function bootstrapDefaultAdmins(_db?: any): Promise<void> {
+  // Supabase profiles bootstrap if needed
 }
 
-/**
- * Ensures built-in administrator accounts exist in the Firestore 'admins' collection.
- */
-export async function bootstrapDefaultAdmins(serverDb: any): Promise<void> {
-  if (!serverDb) return;
-  try {
-    for (const email of DEFAULT_ADMIN_EMAILS) {
-      const docKey = email.toLowerCase().trim().replace(/[^a-zA-Z0-9_-]/g, '_');
-      const adminRef = serverDoc(serverDb, "admins", docKey);
-      await serverSetDoc(adminRef, {
-        email: email.toLowerCase().trim(),
-        role: 'Store Administrator',
-        permissions: ALL_ADMIN_ACTIONS,
-        isActive: true,
-        grantedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-    }
-    console.log("[AdminPermissionsServer] Bootstrapped administrator accounts in Firestore");
-  } catch (err: any) {
-    console.warn("[AdminPermissionsServer] Bootstrap notice:", err.message);
-  }
-}
-
-/**
- * Checks whether an email or UID has administrative privileges.
- * Equal validation across all registered admins.
- */
-export async function isAuthorizedAdmin(serverDb: any, email?: string | null, uid?: string | null): Promise<boolean> {
+export async function isAuthorizedAdmin(_db?: any, email?: string | null, uid?: string | null): Promise<boolean> {
   const normEmail = (email || '').toLowerCase().trim();
   const cleanUid = (uid || '').trim();
-  const sanitizedEmailKey = normEmail ? normEmail.replace(/[^a-zA-Z0-9_-]/g, '_') : '';
 
   if (normEmail && DEFAULT_ADMIN_EMAILS.includes(normEmail)) return true;
 
@@ -168,76 +74,31 @@ export async function isAuthorizedAdmin(serverDb: any, email?: string | null, ui
     .filter(Boolean);
   if (normEmail && envAdmins.includes(normEmail)) return true;
 
-  // Check cached Firestore admins
-  if (normEmail && (cachedAdmins.has(normEmail) || (sanitizedEmailKey && cachedAdmins.has(sanitizedEmailKey)))) {
-    const r = cachedAdmins.get(normEmail) || cachedAdmins.get(sanitizedEmailKey);
-    if (r?.isActive) return true;
-  }
-  if (cleanUid && cachedAdmins.has(cleanUid) && cachedAdmins.get(cleanUid)?.isActive) return true;
-
-  // Query Firestore if not found in memory
-  if (serverDb) {
-    await syncAdminCacheFromFirestore(serverDb);
-    if (normEmail && (cachedAdmins.has(normEmail) || (sanitizedEmailKey && cachedAdmins.has(sanitizedEmailKey)))) {
-      const r = cachedAdmins.get(normEmail) || cachedAdmins.get(sanitizedEmailKey);
-      if (r?.isActive) return true;
+  // Check Supabase profiles table
+  try {
+    const client = getSupabaseAdminClient();
+    if (cleanUid) {
+      const { data } = await client.from('profiles').select('is_admin, publisher_role').eq('id', cleanUid).maybeSingle();
+      if (data && (data.is_admin || data.publisher_role === 'Store Administrator' || data.publisher_role === 'Super Admin')) {
+        return true;
+      }
     }
-    if (cleanUid && cachedAdmins.has(cleanUid) && cachedAdmins.get(cleanUid)?.isActive) return true;
-
-    // Check direct doc in admins collection by UID or email
-    try {
-      if (cleanUid) {
-        const directAdminUid = await serverGetDoc(serverDoc(serverDb, "admins", cleanUid));
-        if (directAdminUid.exists() && directAdminUid.data()?.isActive !== false) return true;
+    if (normEmail) {
+      const { data } = await client.from('profiles').select('is_admin, publisher_role').eq('email', normEmail).maybeSingle();
+      if (data && (data.is_admin || data.publisher_role === 'Store Administrator' || data.publisher_role === 'Super Admin')) {
+        return true;
       }
-      if (normEmail) {
-        const directAdminEmail = await serverGetDoc(serverDoc(serverDb, "admins", sanitizedEmailKey || normEmail));
-        if (directAdminEmail.exists() && directAdminEmail.data()?.isActive !== false) return true;
-      }
-    } catch {}
-
-    // Check user document for role == 'admin' or publisherRole == 'Store Administrator'
-    try {
-      if (cleanUid) {
-        const userDoc = await serverGetDoc(serverDoc(serverDb, "users", cleanUid));
-        if (userDoc.exists()) {
-          const u: any = userDoc.data();
-          if (u.role === 'admin' || u.isAdmin === true || u.publisherRole === 'Store Administrator' || u.publisherRole === 'Super Admin') {
-            return true;
-          }
-        }
-      }
-      if (normEmail) {
-        const qUser = serverQuery(
-          serverCollection(serverDb, "users"),
-          serverWhere("email", "==", normEmail),
-          serverLimit(1)
-        );
-        const uSnap = await serverGetDocs(qUser);
-        if (!uSnap.empty) {
-          const u: any = uSnap.docs[0].data();
-          if (u.role === 'admin' || u.isAdmin === true || u.publisherRole === 'Store Administrator' || u.publisherRole === 'Super Admin') {
-            return true;
-          }
-        }
-      }
-    } catch {}
-  }
+    }
+  } catch {}
 
   return false;
 }
 
-/**
- * Validates if an administrator has permission to perform an action under the shared RBAC model.
- * Complete equality across all verified store administrators.
- */
 export async function hasAdminPermission(
-  serverDb: any,
+  _db: any,
   action: AdminAction,
   email?: string | null,
   uid?: string | null
 ): Promise<boolean> {
-  const isAdmin = await isAuthorizedAdmin(serverDb, email, uid);
-  // Complete equality: all authorized administrators have permission for all administrative actions
-  return isAdmin;
+  return await isAuthorizedAdmin(_db, email, uid);
 }

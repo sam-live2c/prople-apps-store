@@ -1,4 +1,4 @@
-import { getServerFirebaseConfig } from './firebaseConfig.ts';
+import { getSupabaseAdminClient } from './supabase.ts';
 import { isStrictAdminEmail, verifySecuritySecret } from './securityDefense.ts';
 import crypto from 'crypto';
 
@@ -10,7 +10,6 @@ export interface VerifiedUser {
 }
 
 // In-memory verification cache to eliminate redundant network calls for identical valid tokens
-// Token SHA-256 -> { user: VerifiedUser, expiresAt: number }
 const verifiedTokenCache = new Map<string, { user: VerifiedUser; expiresAt: number }>();
 
 // Periodic pruning of expired token cache every 5 minutes
@@ -28,11 +27,9 @@ function getSha256(str: string): string {
 }
 
 /**
- * Authoritatively verifies a Firebase ID Token using Google Identity Toolkit.
- * Decodes, validates structure, and verifies cryptographic signature against Google Auth servers.
- * Never trusts client claims without verification.
+ * Authoritatively verifies a Supabase JWT Token against Supabase Auth.
  */
-export async function verifyFirebaseIdToken(rawToken?: string | null): Promise<VerifiedUser | null> {
+export async function verifySupabaseToken(rawToken?: string | null): Promise<VerifiedUser | null> {
   if (!rawToken || typeof rawToken !== 'string') return null;
   const token = rawToken.replace(/^Bearer\s+/i, '').trim();
   if (!token || token.split('.').length !== 3) return null;
@@ -44,7 +41,7 @@ export async function verifyFirebaseIdToken(rawToken?: string | null): Promise<V
     return cached.user;
   }
 
-  // Fast structural decode to check basic expiration before hitting Google API
+  // Fast structural decode to check basic expiration before hitting Supabase API
   try {
     const payloadPart = token.split('.')[1];
     const decodedPayload = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf-8'));
@@ -55,34 +52,17 @@ export async function verifyFirebaseIdToken(rawToken?: string | null): Promise<V
     return null; // Malformed payload
   }
 
-  const { apiKey } = getServerFirebaseConfig();
-  if (!apiKey || apiKey.includes('example')) {
-    return null;
-  }
-
   try {
-    const lookupUrl = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(lookupUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken: token }),
-      signal: AbortSignal.timeout(4000),
-    });
-
-    if (!res.ok) {
+    const supabase = getSupabaseAdminClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
       return null;
     }
 
-    const data = await res.json().catch(() => null);
-    const userInfo = data?.users?.[0];
-    if (!userInfo || !userInfo.localId) {
-      return null;
-    }
-
-    const uid = userInfo.localId;
-    const email = (userInfo.email || '').toLowerCase().trim();
-    const emailVerified = Boolean(userInfo.emailVerified);
-    const isAdmin = Boolean(email && emailVerified && isStrictAdminEmail(email));
+    const uid = user.id;
+    const email = (user.email || '').toLowerCase().trim();
+    const emailVerified = Boolean(user.email_confirmed_at || user.confirmed_at);
+    const isAdmin = Boolean(email && (isStrictAdminEmail(email) || user.user_metadata?.is_admin));
 
     const verified: VerifiedUser = {
       uid,
@@ -91,7 +71,6 @@ export async function verifyFirebaseIdToken(rawToken?: string | null): Promise<V
       isAdmin,
     };
 
-    // Cache valid token for 5 minutes or until token expiration
     verifiedTokenCache.set(tokenHash, {
       user: verified,
       expiresAt: now + 5 * 60 * 1000,
@@ -99,15 +78,17 @@ export async function verifyFirebaseIdToken(rawToken?: string | null): Promise<V
 
     return verified;
   } catch (err: any) {
-    console.warn('[TokenVerifier] Error verifying ID token with Identity Toolkit:', err?.message || err);
+    console.warn('[TokenVerifier] Error verifying Supabase token:', err?.message || err);
     return null;
   }
 }
 
+// Backward-compatibility alias
+export const verifyFirebaseIdToken = verifySupabaseToken;
+
 /**
  * Centralized caller authorization helper:
  * Resolves verified caller identity from Authorization header or admin secret.
- * Prevents client-controlled identity spoofing (X-User-Id / body.userId).
  */
 export async function authenticateApiRequest(req: any): Promise<{
   isAuthenticated: boolean;
@@ -129,7 +110,7 @@ export async function authenticateApiRequest(req: any): Promise<{
   const rawToken = (authHeader || req.body?.idToken || '').replace(/^Bearer\s+/i, '').trim();
 
   if (rawToken) {
-    const verified = await verifyFirebaseIdToken(rawToken);
+    const verified = await verifySupabaseToken(rawToken);
     if (verified) {
       return {
         isAuthenticated: true,

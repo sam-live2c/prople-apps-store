@@ -4,14 +4,22 @@ importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
 try {
-  firebase.initializeApp({
-    apiKey: "AIzaSyC5iotZL4UVF7QcdVn1ps3gIcetBDt9sc4",
-    authDomain: "prople-store-3efed.firebaseapp.com",
-    projectId: "prople-store-3efed",
-    storageBucket: "prople-store-3efed.firebasestorage.app",
-    messagingSenderId: "374295310162",
-    appId: "1:374295310162:web:dcd5f14a552ddbf96dd48b"
-  });
+  // Read configuration passed via service worker URL query parameters or server endpoint
+  const swUrl = new URL(self.location.href);
+  const apiKey = swUrl.searchParams.get('apiKey');
+  const projectId = swUrl.searchParams.get('projectId');
+  const appId = swUrl.searchParams.get('appId');
+
+  if (apiKey && projectId) {
+    firebase.initializeApp({
+      apiKey,
+      authDomain: `${projectId}.firebaseapp.com`,
+      projectId,
+      storageBucket: `${projectId}.firebasestorage.app`,
+      messagingSenderId: swUrl.searchParams.get('messagingSenderId') || '',
+      appId: appId || ''
+    });
+  }
 
   const messaging = firebase.messaging();
 

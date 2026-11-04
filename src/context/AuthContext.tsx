@@ -28,6 +28,7 @@ import {
   propagatePublisherNameToAllReleases, 
   getPreservedClaimedName, 
   setPreservedClaimedName, 
+  clearPreservedClaimedName,
   getOrCreateGuestUid 
 } from '../services/publisherNameService';
 import { AdminPermissionsService, DEFAULT_ADMIN_EMAILS } from '../services/adminPermissionsService';
@@ -158,10 +159,7 @@ export async function unifyUserProfileAcrossAccounts(
   const validInitialName = !isInvalidName(rawInitialName) ? rawInitialName : '';
   const rawLocalName = (localAccountData?.publisherName || localAccountData?.displayName || '').trim();
   const validLocalName = !isInvalidName(rawLocalName) ? rawLocalName : '';
-  const preservedClaimed = getPreservedClaimedName().trim();
-  const validPreservedName = !isInvalidName(preservedClaimed) ? preservedClaimed : '';
-
-  let mergedPublisherName = validInitialName || validLocalName || validPreservedName || '';
+  let mergedPublisherName = validInitialName || validLocalName || '';
   let mergedPublisherRole = isAdminHardcoded
     ? 'Store Administrator'
     : isDevHardcoded
@@ -509,17 +507,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   })());
   const [user, setUser] = useState<UserProfile | null>(() => {
     try {
-      // If 2-step verification OTP is still pending, do not hydrate user session prematurely
       if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(SESSION_PENDING_2FA_KEY) === '1') {
         return null;
       }
-      // Purge any legacy inquiry status
       localStorage.removeItem('developer_inquiry_status');
       const saved = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        // Automatically purge any stale mock, synthetic, or fake "Google Developer" accounts
         const isStaleFakeAccount = Boolean(
+          !parsed ||
+          typeof parsed !== 'object' ||
+          !parsed.email ||
+          !parsed.email.includes('@') ||
           parsed.email === 'developer@prople.store' ||
           parsed.displayName === 'Google Developer' ||
           parsed.uid === 'developer' ||
@@ -530,31 +529,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return null;
         }
 
-        // If not a store admin or verified publisher, ensure standard user role
         if (!isDeveloperEmail(parsed.email) && !parsed.isPublisher) {
           parsed.publisherRole = 'Standard User';
           parsed.isPublisher = false;
         }
         return parsed;
-      }
-
-      // If no stored profile yet, hydrate stealth profile if user has a preserved claimed name
-      const preserved = getPreservedClaimedName();
-      if (preserved && preserved !== 'undefined' && preserved !== 'null' && preserved.toLowerCase() !== 'user') {
-        const guestUid = getOrCreateGuestUid();
-        return {
-          uid: guestUid,
-          email: '',
-          displayName: preserved,
-          publisherName: preserved,
-          isPublisher: true,
-          publisherRole: 'Standard User',
-          publishedAppIds: [],
-          bio: '',
-          age: '25',
-          gender: 'Prefer not to say',
-          location: 'Global',
-        };
       }
     } catch {
       // fallback
@@ -643,36 +622,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
       } else {
-        // When not authenticated with Firebase, maintain any active guest/stealth or local session
+        setFirebaseUser(null);
         setUser((prev) => {
-          if (prev && (prev.displayName || prev.publisherName)) {
-            return prev;
+          if (prev && prev.email && prev.email.includes('@')) {
+            try {
+              const saved = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
+              if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed && typeof parsed === 'object' && parsed.email && parsed.email.toLowerCase().trim() === prev.email.toLowerCase().trim()) {
+                  return prev;
+                }
+              }
+            } catch {}
           }
           try {
             const saved = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
             if (saved) {
               const parsed = JSON.parse(saved);
-              if (parsed && typeof parsed === 'object' && (parsed.displayName || parsed.publisherName)) {
+              if (parsed && typeof parsed === 'object' && parsed.email && parsed.email.includes('@')) {
                 return parsed;
               }
             }
           } catch {}
-          const preserved = getPreservedClaimedName();
-          if (preserved && preserved !== 'undefined' && preserved !== 'null' && preserved.toLowerCase() !== 'user') {
-            return {
-              uid: getOrCreateGuestUid(),
-              email: '',
-              displayName: preserved,
-              publisherName: preserved,
-              isPublisher: true,
-              publisherRole: 'Standard User',
-              publishedAppIds: [],
-              bio: '',
-              age: '25',
-              gender: 'Prefer not to say',
-              location: 'Global',
-            };
-          }
           return null;
         });
         setIsLoading(false);
@@ -1788,11 +1759,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     setIsLoading(true);
-    // Explicitly preserve the claimed publisher name across logout
-    const currentName = (user?.publisherName || user?.displayName || getPreservedClaimedName() || '').trim();
-    if (currentName && currentName !== 'undefined' && currentName !== 'null' && currentName.toLowerCase() !== 'user') {
-      setPreservedClaimedName(currentName);
-    }
+    try {
+      clearPreservedClaimedName();
+      localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+      localStorage.removeItem('prople_preserved_claimed_name');
+      localStorage.removeItem('prople_pending_2fa');
+      localStorage.removeItem('appmarket_user_profile');
+      if (user?.email) {
+        localStorage.removeItem('prople_saved_profile_' + user.email.toLowerCase().trim());
+      }
+      sessionStorage.clear();
+    } catch {}
+
+    setUser(null);
+    setFirebaseUser(null);
+
     try {
       await signOut(auth);
     } catch (err) {
@@ -1802,29 +1783,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await supabase.auth.signOut();
     } catch {}
     finally {
-      if (currentName && currentName !== 'undefined' && currentName !== 'null' && currentName.toLowerCase() !== 'user') {
-        setPreservedClaimedName(currentName);
-        const stealthProfile: UserProfile = {
-          uid: getOrCreateGuestUid(),
-          email: '',
-          displayName: currentName,
-          publisherName: currentName,
-          isPublisher: true,
-          publisherRole: 'Standard User',
-          publishedAppIds: [],
-          bio: user?.bio || '',
-          age: user?.age || '25',
-          gender: user?.gender || 'Prefer not to say',
-          location: user?.location || 'Global',
-        };
-        setUser(stealthProfile);
-        try {
-          localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(stealthProfile));
-        } catch {}
-      } else {
-        setUser(null);
+      clearPreservedClaimedName();
+      setUser(null);
+      setFirebaseUser(null);
+      try {
         localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
-      }
+        localStorage.removeItem('prople_preserved_claimed_name');
+        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+          const channel = new BroadcastChannel('prople_auth_sync');
+          channel.postMessage({ type: 'AUTH_LOGOUT' });
+          channel.close();
+        }
+      } catch {}
       setIsLoading(false);
     }
   };
