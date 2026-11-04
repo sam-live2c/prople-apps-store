@@ -74,6 +74,15 @@ export function sanitizeErrorMessage(
     return 'This domain is not in the Firebase Authorized Domains list. Please add your app domain to Firebase Console > Authentication > Settings > Authorized domains.';
   }
 
+  if (
+    lower.includes('invalid_client') ||
+    lower.includes('oauth client was not found') ||
+    lower.includes('error 401') ||
+    lower.includes('unauthorized_client')
+  ) {
+    return 'Google OAuth Client not found (Error 401: invalid_client). The Google OAuth Client ID in Supabase/Google Cloud has expired or was deleted. Please sign in with Email OTP or update your Google credentials.';
+  }
+
   // Filter provider names and API key leakages
   if (lower.includes('resend') || lower.includes('api key') || lower.includes('apikey') || lower.includes('smtp') || lower.includes('provider')) {
     return 'Unable to deliver verification email at this moment. Please check your email or try signing in with Google.';

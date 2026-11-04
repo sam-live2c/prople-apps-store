@@ -558,6 +558,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, 2000);
 
     // Process any returning OAuth redirect logins (e.g., GitHub on mobile browsers)
+    try {
+      if (typeof window !== 'undefined') {
+        const hash = window.location.hash || '';
+        const search = window.location.search || '';
+        const params = new URLSearchParams(hash.startsWith('#') ? hash.substring(1) : search);
+        const oauthError = params.get('error') || params.get('error_code');
+        const errorDesc = params.get('error_description');
+        if (oauthError || errorDesc) {
+          console.warn('[AuthContext] OAuth callback error detected:', oauthError, errorDesc);
+          const cleanUrl = window.location.pathname;
+          window.history.replaceState({}, document.title, cleanUrl);
+        }
+      }
+    } catch {}
+
     getRedirectResult(auth)
       .then(async (redirectCred) => {
         if (redirectCred?.user) {
