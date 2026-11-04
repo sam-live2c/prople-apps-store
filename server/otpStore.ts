@@ -184,6 +184,12 @@ export function verifyChallengeToken(
 }
 
 const RTDB_URL = (process.env.DATABASE_URL || '').replace(/\/$/, '');
+const isRtdbConfigured = Boolean(
+  RTDB_URL &&
+  (RTDB_URL.startsWith('http://') || RTDB_URL.startsWith('https://')) &&
+  !RTDB_URL.includes('postgres') &&
+  !RTDB_URL.includes('postgresql')
+);
 
 function getOtpKey(email: string): string {
   // Safe Firebase RTDB key by base64 encoding normalized email
@@ -216,24 +222,26 @@ export async function persistOtp(
   // 1. In-memory cache
   memoryStore.set(norm, record);
 
-  // 2. Realtime Database persistent store (stores only cryptographic codeHmac, expiry, and metadata)
-  try {
-    const key = getOtpKey(norm);
-    const url = `${RTDB_URL}/_auth_otps/${key}.json`;
-    await fetch(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        codeHmac: record.codeHmac,
-        email: norm,
-        expiresAt,
-        attempts: 0,
-        createdAt: now,
-      }),
-      signal: AbortSignal.timeout(4000),
-    });
-  } catch (err: any) {
-    // Graceful fallback to memory and stateless TOTP verification
+  // 2. Realtime Database persistent store (if configured)
+  if (isRtdbConfigured) {
+    try {
+      const key = getOtpKey(norm);
+      const url = `${RTDB_URL}/_auth_otps/${key}.json`;
+      await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          codeHmac: record.codeHmac,
+          email: norm,
+          expiresAt,
+          attempts: 0,
+          createdAt: now,
+        }),
+        signal: AbortSignal.timeout(4000),
+      });
+    } catch (err: any) {
+      // Graceful fallback to memory and stateless TOTP verification
+    }
   }
 }
 
@@ -313,26 +321,28 @@ export async function verifyAndConsumeOtp(
   }
 
   // 4. Fourth fallback: Check Realtime Database if accessible
-  try {
-    const url = `${RTDB_URL}/_auth_otps/${key}.json`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(2500) });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && typeof data === 'object') {
-        const rtdbRecord = data as StoredOtpRecord;
-        if (now <= (rtdbRecord.expiresAt || 0) + 3 * 60 * 1000) {
-          const matchesHmac = rtdbRecord.codeHmac ? timingSafeEqualString(rtdbRecord.codeHmac, hmacDigest(cleanCode, norm)) : false;
-          if (matchesHmac) {
-            if (consume) {
-              await deleteOtpRecord(norm, key);
-              consumedCodesStore.set(`${norm}:${cleanCode}`, now + 45 * 60 * 1000);
+  if (isRtdbConfigured) {
+    try {
+      const url = `${RTDB_URL}/_auth_otps/${key}.json`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(2500) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && typeof data === 'object') {
+          const rtdbRecord = data as StoredOtpRecord;
+          if (now <= (rtdbRecord.expiresAt || 0) + 3 * 60 * 1000) {
+            const matchesHmac = rtdbRecord.codeHmac ? timingSafeEqualString(rtdbRecord.codeHmac, hmacDigest(cleanCode, norm)) : false;
+            if (matchesHmac) {
+              if (consume) {
+                await deleteOtpRecord(norm, key);
+                consumedCodesStore.set(`${norm}:${cleanCode}`, now + 45 * 60 * 1000);
+              }
+              return { valid: true };
             }
-            return { valid: true };
           }
         }
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
   // 5. Code did not match any active record or window
   return {
@@ -343,11 +353,13 @@ export async function verifyAndConsumeOtp(
 
 async function deleteOtpRecord(email: string, key: string): Promise<void> {
   memoryStore.delete(email);
-  try {
-    await fetch(`${RTDB_URL}/_auth_otps/${key}.json`, {
-      method: 'DELETE',
-    });
-  } catch {}
+  if (isRtdbConfigured) {
+    try {
+      await fetch(`${RTDB_URL}/_auth_otps/${key}.json`, {
+        method: 'DELETE',
+      });
+    } catch {}
+  }
 }
 
 /**
@@ -404,17 +416,19 @@ export async function createAuthSession(email: string): Promise<void> {
 
   sessionMemoryStore.set(norm, record);
 
-  try {
-    const key = getOtpKey(norm);
-    const url = `${RTDB_URL}/_auth_sessions/${key}.json`;
-    await fetch(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(record),
-      signal: AbortSignal.timeout(4000),
-    });
-  } catch (err: any) {
-    console.warn('[Auth Session] RTDB write session notice:', err?.message || err);
+  if (isRtdbConfigured) {
+    try {
+      const key = getOtpKey(norm);
+      const url = `${RTDB_URL}/_auth_sessions/${key}.json`;
+      await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record),
+        signal: AbortSignal.timeout(4000),
+      });
+    } catch (err: any) {
+      console.warn('[Auth Session] RTDB write session notice:', err?.message || err);
+    }
   }
 }
 
@@ -435,17 +449,19 @@ export async function completeAuthSession(email: string, user: any): Promise<voi
 
   sessionMemoryStore.set(norm, record);
 
-  try {
-    const key = getOtpKey(norm);
-    const url = `${RTDB_URL}/_auth_sessions/${key}.json`;
-    await fetch(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(record),
-      signal: AbortSignal.timeout(4000),
-    });
-  } catch (err: any) {
-    console.warn('[Auth Session] RTDB complete session notice:', err?.message || err);
+  if (isRtdbConfigured) {
+    try {
+      const key = getOtpKey(norm);
+      const url = `${RTDB_URL}/_auth_sessions/${key}.json`;
+      await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record),
+        signal: AbortSignal.timeout(4000),
+      });
+    } catch (err: any) {
+      console.warn('[Auth Session] RTDB complete session notice:', err?.message || err);
+    }
   }
 }
 
@@ -463,8 +479,8 @@ export async function getAuthSessionStatus(email: string): Promise<{
   // 1. Check in-memory store
   let record: AuthSessionRecord | undefined = sessionMemoryStore.get(norm);
 
-  // 2. Fallback to RTDB
-  if (!record || (record.status === 'pending' && now - record.createdAt > 3000)) {
+  // 2. Fallback to RTDB if configured
+  if (isRtdbConfigured && (!record || (record.status === 'pending' && now - record.createdAt > 3000))) {
     try {
       const key = getOtpKey(norm);
       const url = `${RTDB_URL}/_auth_sessions/${key}.json`;
@@ -509,14 +525,16 @@ export async function consumeAuthSession(email: string): Promise<void> {
   const norm = email.toLowerCase().trim();
   sessionMemoryStore.delete(norm);
 
-  try {
-    const key = getOtpKey(norm);
-    const url = `${RTDB_URL}/_auth_sessions/${key}.json`;
-    await fetch(url, {
-      method: 'DELETE',
-      signal: AbortSignal.timeout(3000),
-    });
-  } catch {}
+  if (isRtdbConfigured) {
+    try {
+      const key = getOtpKey(norm);
+      const url = `${RTDB_URL}/_auth_sessions/${key}.json`;
+      await fetch(url, {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch {}
+  }
 }
 
 /**
