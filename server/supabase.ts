@@ -3,13 +3,13 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 const SUPABASE_URL = 
   process.env.SUPABASE_URL || 
   process.env.VITE_SUPABASE_URL || 
-  '';
+  'https://tygkgbmobqqxnvmeveof.supabase.co';
 
 const SUPABASE_KEY = 
   process.env.SUPABASE_SECRET_KEY || 
   process.env.SUPABASE_PUBLISHABLE_KEY || 
   process.env.VITE_SUPABASE_PUBLISHABLE_KEY || 
-  '';
+  'sb_publishable_wO_xyGrJb7s1KKCW_OMOIg_-UWSbq-0';
 
 let supabaseClient: SupabaseClient | null = null;
 let isSupabaseHealthy = false;
@@ -17,7 +17,7 @@ let lastHealthCheck = 0;
 
 export function getSupabaseAdminClient(): SupabaseClient {
   if (!supabaseClient) {
-    supabaseClient = createClient(SUPABASE_URL || 'https://placeholder.supabase.co', SUPABASE_KEY || 'placeholder-key', {
+    supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: {
         persistSession: false,
         autoRefreshToken: false,

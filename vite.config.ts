@@ -15,7 +15,10 @@ export default defineConfig(({ mode }) => {
   const env = { ...process.env, ...loadEnv(mode, process.cwd(), '') };
 
   return {
-    define: {},
+    define: {
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(env.VITE_SUPABASE_URL || 'https://tygkgbmobqqxnvmeveof.supabase.co'),
+      'import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify(env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_wO_xyGrJb7s1KKCW_OMOIg_-UWSbq-0'),
+    },
     plugins: [
       react(),
       tailwindcss(),
