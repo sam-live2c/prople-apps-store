@@ -19,6 +19,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, serverTimestamp, collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { auth, db } from '../firebase';
+import { supabase } from '../utils/supabase';
 import { UserProfile, DeveloperKeystore } from '../types';
 import { generateDeveloperKeystore } from '../services/keystoreService';
 import { safeFetchJson } from '../utils/safeFetch';
@@ -484,9 +485,16 @@ async function syncUserProfileToFirestore(profile: UserProfile): Promise<void> {
           photoURL: profile.photoURL
         })
       }).catch(() => {});
+
+      // Sync user profile to Supabase profiles table
+      safeFetchJson('/api/supabase/sync-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profile)
+      }).catch(() => {});
     }
   } catch (err) {
-    console.warn('Could not sync user profile to Firestore:', err);
+    console.warn('Could not sync user profile to Firestore/Supabase:', err);
   }
 }
 
@@ -688,6 +696,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch {}
 
+    // Supabase Auth state listener: automatically unifies sessions from Google, GitHub, or Email
+    const { data: { subscription: supabaseAuthSub } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user && (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION')) {
+        const sbUser = session.user;
+        const email = sbUser.email || '';
+        if (email) {
+          const rawName = (sbUser.user_metadata?.full_name || sbUser.user_metadata?.name || sbUser.user_metadata?.user_name || '').trim();
+          try {
+            const unified = await unifyUserProfileAcrossAccounts(email, sbUser.id, {
+              email,
+              displayName: rawName,
+              publisherName: rawName,
+              photoURL: sbUser.user_metadata?.avatar_url || sbUser.user_metadata?.picture || undefined,
+              isEmailVerified: Boolean(sbUser.email_confirmed_at),
+            });
+            setUser(unified);
+            try {
+              localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(unified));
+            } catch {}
+            syncUserProfileToFirestore(unified);
+          } catch (e) {
+            console.warn('[AuthContext] Supabase onAuthStateChange profile notice:', e);
+          }
+        }
+      }
+    });
+
     const handleStorage = (e: StorageEvent) => {
       if (e.key === LOCAL_STORAGE_USER_KEY && e.newValue) {
         try {
@@ -702,6 +737,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       unsubscribe();
+      supabaseAuthSub?.unsubscribe();
       channel?.close();
       window.removeEventListener('storage', handleStorage);
     };
@@ -877,7 +913,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Both Firebase and server fallback failed: Register failed login strike in security audit log
+      // Check Supabase Auth password as authoritative credential verification
+      try {
+        const { data: sbAuthData, error: sbErr } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: pass,
+        });
+        if (sbAuthData?.user && !sbErr) {
+          const sbUser = sbAuthData.user;
+          const userEmail = sbUser.email || cleanEmail;
+          const rawName = (sbUser.user_metadata?.full_name || sbUser.user_metadata?.name || sbUser.user_metadata?.user_name || '').trim();
+          const unified = await unifyUserProfileAcrossAccounts(userEmail, sbUser.id, {
+            email: userEmail,
+            displayName: rawName,
+            publisherName: rawName,
+            photoURL: sbUser.user_metadata?.avatar_url || sbUser.user_metadata?.picture || undefined,
+            isEmailVerified: Boolean(sbUser.email_confirmed_at),
+          });
+          setUser(unified);
+          localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(unified));
+          syncUserProfileToFirestore(unified);
+          return;
+        }
+      } catch (sbLoginErr) {
+        // Continue to strike reporting
+      }
+
+      // Both Firebase, server fallback, and Supabase failed: Register failed login strike in security audit log
       try {
         const { data: failData } = await safeFetchJson<{
           success: boolean;
@@ -1095,6 +1157,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.warn('[AuthContext] Server register-user notice:', serverErr);
       }
 
+      // Sync signup to Supabase Auth
+      try {
+        await supabase.auth.signUp({
+          email: cleanEmail,
+          password: pass,
+          options: {
+            data: {
+              full_name: cleanName || cleanEmail.split('@')[0],
+              name: cleanName || cleanEmail.split('@')[0],
+            }
+          }
+        });
+      } catch (sbSignUpErr) {
+        console.warn('[AuthContext] Supabase signup sync notice:', sbSignUpErr);
+      }
+
       const nowTs = cleanName ? Date.now() : undefined;
       const unified = await unifyUserProfileAcrossAccounts(cleanEmail, userUid, {
         email: cleanEmail,
@@ -1255,6 +1333,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!linkedSuccessfully) {
           message = `An account already exists for ${conflictingEmail || 'this email'}. Please sign in with GitHub or your password to link your accounts.`;
         }
+      } else if (err?.code === 'auth/operation-not-allowed' || err?.code === 'auth/unauthorized-domain') {
+        try {
+          const { error: sbOAuthErr } = await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: { redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined }
+          });
+          if (!sbOAuthErr) return;
+        } catch {}
+        message = 'Google sign-in could not be completed. Please try again.';
       } else if (err?.message) {
         message = err.message;
       }
@@ -1427,11 +1514,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!linkedSuccessfully) {
           message = `An account already exists for ${conflictingEmail || 'this email'}. Please sign in with Google or your password to link your GitHub account.`;
         }
-      } else if (err?.code === 'auth/operation-not-allowed') {
-        message = 'GitHub sign-in is not yet enabled in Firebase Console. Please enable GitHub under Authentication > Sign-in method in Firebase Console with your GitHub OAuth credentials.';
-      } else if (err?.code === 'auth/unauthorized-domain') {
-        const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
-        message = `This domain (${currentHost}) is not in the Firebase Authorized Domains list. Please add it under Authentication > Settings > Authorized domains in Firebase Console.`;
+      } else if (err?.code === 'auth/operation-not-allowed' || err?.code === 'auth/unauthorized-domain') {
+        try {
+          const { error: sbOAuthErr } = await supabase.auth.signInWithOAuth({
+            provider: 'github',
+            options: { redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined }
+          });
+          if (!sbOAuthErr) return;
+        } catch {}
+        message = 'GitHub sign-in could not be completed. Please try again.';
       } else if (err?.message) {
         message = err.message;
       }
@@ -1706,7 +1797,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signOut(auth);
     } catch (err) {
       console.warn('SignOut error or offline:', err);
-    } finally {
+    }
+    try {
+      await supabase.auth.signOut();
+    } catch {}
+    finally {
       if (currentName && currentName !== 'undefined' && currentName !== 'null' && currentName.toLowerCase() !== 'user') {
         setPreservedClaimedName(currentName);
         const stealthProfile: UserProfile = {

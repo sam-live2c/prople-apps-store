@@ -93,6 +93,18 @@ import {
   hasAdminPermission
 } from "./server/adminPermissions.ts";
 import { authenticateApiRequest } from "./server/tokenVerifier.ts";
+import {
+  getSupabaseAdminClient,
+  checkSupabaseHealth,
+  fetchAppsFromSupabase,
+  fetchAppFromSupabase,
+  upsertAppToSupabase,
+  fetchReviewsFromSupabase,
+  insertReviewToSupabase,
+  migrateFirestoreAppsToSupabase,
+  getSupabaseDiagnostics,
+  upsertProfileToSupabase
+} from "./server/supabase.ts";
 
 // Server-side Firestore initialization using secure environment or project configuration
 let serverDb: any = null;
@@ -3272,6 +3284,14 @@ async function startServer() {
         }
       }
 
+      // Check Supabase reviews
+      try {
+        const sbReviews = await fetchReviewsFromSupabase(appId);
+        sbReviews.forEach(r => {
+          if (r && r.id) reviewsMap.set(r.id, r);
+        });
+      } catch {}
+
       const reviews = Array.from(reviewsMap.values());
       reviews.sort((a, b) => {
         const dateA = new Date(a.date || a.createdAt).getTime() || 0;
@@ -3443,6 +3463,9 @@ async function startServer() {
           }
         }
       }
+
+      // 2b. Persist to Supabase
+      insertReviewToSupabase(cleanReview).catch(e => console.warn('[Supabase Review Sync]:', e.message));
 
       // 3. Recalculate app ratings aggregate & update both apps and banners collections
       const aggregates = await recalculateAndPersistAppRating(appId).catch(() => ({
@@ -4484,6 +4507,68 @@ async function startServer() {
       }
 
       return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Supabase Backend Integration: Complete Status & Health Diagnostic
+  app.get("/api/supabase/status", async (req, res) => {
+    try {
+      const diagnostics = await getSupabaseDiagnostics();
+      const appsReady = Boolean(diagnostics.tables.apps?.ready);
+      const appsCount = diagnostics.tables.apps?.count || 0;
+
+      return res.json({
+        success: true,
+        connected: diagnostics.connected,
+        latencyMs: diagnostics.latencyMs,
+        projectUrl: diagnostics.projectUrl,
+        auth: diagnostics.auth,
+        tables: diagnostics.tables,
+        tableReady: appsReady,
+        appsCount,
+        schemaSqlFile: 'supabase/schema.sql',
+        notice: diagnostics.connected
+          ? `Supabase is connected. Apps: ${appsCount}, Auth Providers: Google (${diagnostics.auth.google}), GitHub (${diagnostics.auth.github}), Email (${diagnostics.auth.email}).`
+          : `Supabase connection could not be established.`
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Supabase User Profile Synchronization
+  app.post("/api/supabase/sync-profile", async (req, res) => {
+    try {
+      const profile = req.body || {};
+      if (!profile || (!profile.uid && !profile.id) || !profile.email) {
+        return res.status(400).json({ success: false, error: "Missing profile uid or email" });
+      }
+      const result = await upsertProfileToSupabase(profile);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Supabase Data Migration: Copy all catalog apps from Firestore to Supabase
+  app.post("/api/supabase/migrate", async (req, res) => {
+    try {
+      const allApps = await getAllAppsServer(1000);
+      if (allApps.length === 0) {
+        return res.json({ success: true, message: "No catalog apps found to migrate.", migratedCount: 0 });
+      }
+
+      const result = await migrateFirestoreAppsToSupabase(allApps);
+      return res.json({
+        success: result.success,
+        migratedCount: result.migratedCount,
+        failedCount: result.failedCount,
+        errors: result.errors,
+        totalCatalog: allApps.length,
+        message: `Successfully migrated ${result.migratedCount} of ${allApps.length} apps to Supabase.`
+      });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
     }
@@ -6137,6 +6222,21 @@ async function startServer() {
         const projectId = !fbConfig.isExampleConfig ? fbConfig.projectId : '';
         const databaseId = !fbConfig.isExampleConfig ? fbConfig.firestoreDatabaseId : '(default)';
 
+        // Method 0: Check Supabase PostgreSQL apps table
+        try {
+          const supabaseApps = await fetchAppsFromSupabase(500);
+          if (supabaseApps && supabaseApps.length > 0) {
+            for (const app of supabaseApps) {
+              indexAppIntoSeoCache(app);
+            }
+            serverAppsCatalogCache = supabaseApps;
+            serverAppsCatalogCacheTime = Date.now();
+            return serverAppsCatalogCache;
+          }
+        } catch (sbErr: any) {
+          // Gracefully continue to Firestore
+        }
+
         // Method 1: Ultra-fast direct HTTP REST fetch (< 100ms, no gRPC handshake delays)
         if (projectId) {
           try {
@@ -6233,6 +6333,15 @@ async function startServer() {
         return freshCached.data;
       }
     }
+
+    // Check Supabase
+    try {
+      const sbApp = await fetchAppFromSupabase(cleanId);
+      if (sbApp && !sbApp.isDeleted && sbApp.isPublished !== false) {
+        seoAppsCache.set(cleanId, { data: sbApp, timestamp: Date.now() });
+        return sbApp;
+      }
+    } catch {}
 
     if (serverDb) {
       try {
@@ -6384,6 +6493,7 @@ async function startServer() {
       serverAppsCatalogCache = [];
       seoAppsCache.delete(appId.toLowerCase());
       indexApp(cleanDoc).catch(() => {});
+      upsertAppToSupabase(cleanDoc).catch(e => console.warn('[Supabase Sync Notice]:', e.message));
       return { success: true, app: cleanDoc };
     } else {
       // New app creation rate limit enforcement (maximum 3 new applications per 15 minutes)
@@ -6416,6 +6526,7 @@ async function startServer() {
       serverAppsCatalogCache = [];
       seoAppsCache.delete(appId.toLowerCase());
       indexApp(cleanDoc).catch(() => {});
+      upsertAppToSupabase(cleanDoc).catch(e => console.warn('[Supabase Sync Notice]:', e.message));
       return { success: true, app: cleanDoc };
     }
   }
@@ -6460,6 +6571,7 @@ async function startServer() {
     recordUpdateRateLimit(updateRateKey);
     serverAppsCatalogCache = [];
     seoAppsCache.delete(appId.toLowerCase());
+    upsertAppToSupabase({ id: appId, ...existingSnap.data(), ...updatePayload }).catch(e => console.warn('[Supabase Sync Notice]:', e.message));
     return { success: true, appId, version };
   }
 

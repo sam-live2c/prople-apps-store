@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react';
 import { extractYouTubeId } from '../../utils/mediaUtils';
 
 interface MediaGalleryLightboxProps {
@@ -246,46 +246,6 @@ export default function MediaGalleryLightbox({
             )}
           </div>
         </div>
-
-        {/* Zoom Controls for Touch & Desktop */}
-        {!isVideo && (
-          <div className="flex items-center gap-1 sm:gap-2 bg-white/10 backdrop-blur-md rounded-full px-2 py-1 border border-white/10">
-            <button
-              type="button"
-              onClick={zoomOut}
-              disabled={scale <= 1}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              aria-label="Zoom out"
-              title="Zoom out (-)"
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
-            <span className="text-xs font-mono font-medium text-white/90 min-w-[36px] text-center">
-              {Math.round(scale * 100)}%
-            </span>
-            <button
-              type="button"
-              onClick={zoomIn}
-              disabled={scale >= 4}
-              className="w-8 h-8 rounded-full flex items-center justify-center text-white/80 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              aria-label="Zoom in"
-              title="Zoom in (+)"
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-            {scale > 1 && (
-              <button
-                type="button"
-                onClick={resetZoom}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-amber-300 hover:text-amber-200 transition-colors ml-1"
-                aria-label="Reset zoom"
-                title="Reset zoom (0)"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Main Visual Display Stage */}
