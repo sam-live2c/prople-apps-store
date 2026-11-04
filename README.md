@@ -1,150 +1,179 @@
-# Prople Store — Multi-Platform Application Marketplace
+<div align="center">
 
-[![CI](https://github.com/sam-live2c/prople-apps-store-/actions/workflows/ci.yml/badge.svg)](https://github.com/sam-live2c/prople-apps-store-/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-v20%2B%20%7C%20v22%2B-brightgreen)](https://nodejs.org/)
-[![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6.svg)](https://www.typescriptlang.org/)
-[![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-v4-38bdf8.svg)](https://tailwindcss.com/)
-[![PWA](https://img.shields.io/badge/PWA-Ready-orange.svg)](https://web.dev/progressive-web-apps/)
+  <img src="public/logo.png" alt="Prople Store Logo" width="100" height="100" />
 
-**Prople Store** is an independent, consumer-grade multi-platform application store and application marketplace operated by **Cloaktail Industries**. It provides verified software distribution across Android, Apple (iOS/iPadOS), Mac (macOS), Linux, Windows, and Web/PWA platforms.
+  # Prople Store
+  **Independent Multi-Platform Application Marketplace & Developer Console**
 
-- **Official Marketplace**: [www.prople.co.in](https://www.prople.co.in)
-- **Publishing, Browsing & Data Guide**: [docs/PLATFORM_GUIDE.md](docs/PLATFORM_GUIDE.md)
-- **Legal & Intermediary Safe Harbor Notice**: [NOTICE](NOTICE)
-- **Architecture & Concept Audit**: [PLATFORM_CONCEPT_AND_AUDIT.md](PLATFORM_CONCEPT_AND_AUDIT.md)
-- **Security Policy**: [SECURITY.md](SECURITY.md)
-- **Roadmap & Priorities**: [ROADMAP.md](ROADMAP.md)
-- **Beginner Issues**: [Good First Issues](docs/GOOD_FIRST_ISSUES.md)
-- **Advanced Contributor Challenges**: [Advanced Challenges](docs/ADVANCED_CONTRIBUTOR_CHALLENGES.md)
+  [![CI Status](https://img.shields.io/github/actions/workflow/status/sam-live2c/prople-apps-store-/ci.yml?branch=main&label=CI%20Build&logo=github&style=flat-square)](https://github.com/sam-live2c/prople-apps-store-/actions)
+  [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
+  [![Node.js](https://img.shields.io/badge/Node.js-v20%20%7C%20v22-339933?logo=node.js&logoColor=white&style=flat-square)](https://nodejs.org/)
+  [![React](https://img.shields.io/badge/React-v19-61dafb?logo=react&logoColor=black&style=flat-square)](https://react.dev/)
+  [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6?logo=typescript&logoColor=white&style=flat-square)](https://www.typescriptlang.org/)
+  [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-38bdf8?logo=tailwindcss&logoColor=white&style=flat-square)](https://tailwindcss.com/)
+  [![PWA Ready](https://img.shields.io/badge/PWA-Installable-5A0FC8?logo=pwa&logoColor=white&style=flat-square)](https://web.dev/progressive-web-apps/)
 
----
+  <p align="center">
+    <a href="https://www.prople.co.in"><strong>Official Marketplace</strong></a> •
+    <a href="docs/PLATFORM_GUIDE.md"><strong>Platform Guide</strong></a> •
+    <a href="SECURITY.md"><strong>Security Policy</strong></a> •
+    <a href="ROADMAP.md"><strong>Roadmap</strong></a> •
+    <a href="CONTRIBUTING.md"><strong>Contributing</strong></a>
+  </p>
 
-## Supported Platforms & Package Formats
-
-| Platform | Target OS / Runtime | Primary Package Formats |
-| :--- | :--- | :--- |
-| **Android** | Android 7.0 and up | `.apk` (Standard Package), `.aab` (Android App Bundle) |
-| **Apple (iOS / iPadOS)** | iOS 14.0 or later | `.ipa` (iOS Package for sideloading & enterprise distribution) |
-| **Mac (macOS)** | macOS 12.0 Monterey or later | `.dmg` (Apple Disk Image), `.pkg` (macOS Installer), `.zip` |
-| **Linux** | Universal Linux | `.deb` (Debian/Ubuntu), `.AppImage` (Universal Portable), `.rpm` (Fedora/RHEL), `.flatpak`, `.tar.gz` |
-| **Windows** | Windows 10, 11 (64-bit) | `.exe` (Win32/x64 Executable), `.msi` (Windows Installer), `.msix`, `.appx`, `.zip` |
-| **Web Apps / PWA** | Modern Web Browsers | Installable Progressive Web Apps (`.pwa`), Web applications, and live interactive demos |
+</div>
 
 ---
 
-## Key Features
+## 📌 Executive Summary
 
-- **Zero-Byte Directory Pointer & Intermediary Safe Harbor**: Prople Store operates purely as a discovery index and directory pointer. Downloads issue immediate HTTP `302 Found` pointer redirects (`Cache-Control: no-store`, `Referrer-Policy: no-referrer`) directly to creator upstream hosts (Cloudflare R2, AWS S3, GitHub Releases, or developer VPS). Zero bytes of compiled executable binaries are proxy-streamed or hosted on Prople Store servers, ensuring strict intermediary compliance under Section 79 of the Indian IT Act 2000, EU DSA, and US § 230.
-- **Cloud-Authoritative SHA-256 Verification**: Automatic cryptographic verification under the hood via cloud headers (`x-amz-checksum-sha256`, `Digest`), sidecar files (`.sha256`), or ephemeral streaming hash checks without storing bytes to disk. The 64-character SHA-256 checksum is immutable and auto-copies to the clipboard on click.
-- **Multi-Source Binary Publishing (Cloud & GitHub)**: Distribute untouched binaries via direct HTTPS links from **Cloudflare R2, AWS S3, self-hosted VPS, custom CDNs**, or **GitHub Releases**—supporting both open-source projects and proprietary private-repository builds across 22+ package formats.
-- **Global Publisher Identity & Immutability**: Globally unique Publisher Names managed in **Settings → Edit Profile** universally propagate across all published apps and releases (with a 30-minute adjustment grace window and 15-day cooldown), while remaining locked and immutable inside individual release forms to prevent per-release spoofing.
-- **Zero-Barrier Browsing & Contained In-App Downloads**: Browse Home, Explore, Top Charts, Categories, and instant Meilisearch/fuzzy search with zero login walls. Direct binary downloads initiate within the app session without jarring new-tab redirects.
-- **Complete Package & Data Transparency**: Every listing surfaces verified SHA-256 checksums, CPU architectures, OS/RAM requirements, Data Safety disclosures, categorized permissions, and authentic `0+`-baseline verified download counts with Bayesian star ratings.
-- **Developer Publishing Console**: 6-step release wizard with isolated draft persistence, S3 media gallery uploads, rate-limited abuse protection (3 new apps / 15m, 5 updates / 1h), and strict per-account ownership isolation.
-- **Dual-Layer Authentication & 2FA**: Secure password hashing with PBKDF2-SHA512, 6-digit email OTP verification codes, and Google OAuth integration.
-- **Search & Generative Engine Optimization (GEO)**: Automated XML sitemaps, OpenGraph/Twitter cards, Schema.org `SoftwareApplication` JSON-LD, MCP discovery tools, and `/llms.txt` + `/llms-full.txt` specifications.
-- **Offline & PWA Resilience**: Service Worker background caching, install prompt support, and IndexedDB catalog caching.
+**Prople Store** is an independent, consumer-grade digital application marketplace operated by **Cloaktail Industries**. It offers verified multi-platform software distribution across **Android**, **Apple (iOS/iPadOS)**, **Mac (macOS)**, **Linux**, **Windows**, and modern **Web/PWA** applications.
 
----
+### 🌟 Core Pillars
 
-## Tech Stack & Architecture
-
-- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Lucide Icons, Motion.
-- **Backend / Server**: Express 4.x running in Node.js 22 with Vite development middleware.
-- **Database & Auth**: Firebase Firestore (`apps`, `users`, `publisher_registry`, `reviews`), Firebase Authentication, Firebase Realtime Database.
-- **Search Engine**: Meilisearch indexer with sub-5ms client-side fallback fuzzy scoring.
-- **Storage & Binary Hosting**: AWS S3 pre-signed media uploads with strict MIME/magic-byte validation; supports external binary delivery from Cloudflare R2, AWS S3, VPS, CDNs, and GitHub Releases.
-- **Transpiler & Bundler**: Vite 6, tsx, esbuild.
+| Pillar | Benefit |
+| :--- | :--- |
+| 🛡️ **Zero-Byte Directory Pointer** | Prople Store never hosts or proxies executable binaries. All installs issue direct HTTP `302 Found` redirects to verified publisher upstream CDNs (Cloudflare R2, AWS S3, GitHub Releases), strictly adhering to statutory safe-harbor standards (Section 79 IT Act 2000, EU DSA, US 47 U.S.C. § 230). |
+| 🔒 **Cryptographic SHA-256** | Every binary release includes an immutable 64-character SHA-256 checksum verified via cloud digest headers, sidecar signatures, or pre-flight verification. |
+| 🌐 **Universal Format Support** | Distribute software across 22+ packaging formats (`.apk`, `.aab`, `.ipa`, `.dmg`, `.pkg`, `.deb`, `.AppImage`, `.rpm`, `.exe`, `.msi`, `.pwa`). |
+| ⚖️ **Merit-Based Discovery** | Transparent Bayesian rating algorithm with zero paid placements, zero sponsored ads, and zero forced sign-in walls for browsing or downloading. |
 
 ---
 
-## Project Structure
+## 💻 Supported Platforms & Formats
 
 ```text
-├── .github/                   # GitHub workflows, PR templates, and issue forms
-│   ├── ISSUE_TEMPLATE/        # Structured YAML issue forms (bugs, features)
-│   ├── workflows/ci.yml       # Automated GitHub Actions CI (lint, typecheck, build)
-│   └── PULL_REQUEST_TEMPLATE.md # Contributor pull request guidelines
-├── api/                       # Serverless API endpoints (Vercel & cloud functions)
-│   ├── apps.ts                # Catalog retrieval endpoint
-│   ├── auth/[action].ts       # 2FA OTP, profile sync, and authentication gateway
-│   ├── download-apk.ts        # Zero-byte 302 directory pointer redirect handler
-│   ├── github-release-meta.ts # GitHub release asset metadata & SHA-256 sidecar resolver
-│   ├── resolve-apk.ts         # Multi-host binary URL, format & cloud SHA-256 resolver
-│   └── seo.ts                 # Dynamic SSR metadata & SPA route handler
-├── docs/                      # Platform specifications & contributor documentation
-│   ├── PLATFORM_GUIDE.md      # Authoritative Publishing, Browsing & Available Data guide
-│   ├── GOOD_FIRST_ISSUES.md   # Beginner-friendly starter tasks with acceptance criteria
-│   └── ADVANCED_CONTRIBUTOR_CHALLENGES.md # Systems, crypto & ranking challenges
-├── NOTICE                     # Intermediary Directory Pointer & Section 79 Safe Harbor Notice
-├── public/                    # Static public assets, PWA manifests, icons
-│   ├── manifest.webmanifest   # Progressive Web App manifest
-│   ├── robots.txt             # Search crawler directives & GEO permissions
-│   └── sitemap.xml            # XML Sitemap index
-├── server/                    # Backend server modules
-│   ├── authSecurity.ts        # Rate limiting, IP lockouts, and brute-force defense
-│   ├── emailAuth.ts           # Resend & transactional email dispatch logic
-│   ├── meilisearch.ts         # Full-text search catalog sync & health monitor
-│   ├── otpStore.ts            # Distributed OTP storage and session security
-│   ├── s3Storage.ts           # AWS S3 pre-signed URLs and buffer uploads
-│   ├── securityDefense.ts     # OWASP defense engine (SSRF, CORS, prototype pollution)
-│   └── seoRenderer.ts         # Server-side HTML metadata and JSON-LD injection
-├── src/                       # Frontend application source
-│   ├── components/            # UI pages, sections, modals, and navigation
-│   ├── context/               # React Context providers (Auth, Navigation, Install, Theme)
-│   ├── services/              # Client-side business logic and Firebase connectors
-│   ├── utils/                 # Security validators, search algorithms, media helpers
-│   ├── App.tsx                # Main view router and overlay shell
-│   └── main.tsx               # Application bootstrap and PWA service worker mount
-├── ROADMAP.md                 # Public product roadmap, priorities, and RFCs
-├── server.ts                  # Unified full-stack Express server entry point
-├── package.json               # Project manifest, dependencies, and build scripts
-├── vite.config.ts             # Vite configuration with PWA and Tailwind plugins
-└── tsconfig.json              # TypeScript compiler configuration
+┌────────────────────────────────────────────────────────────────────────┐
+│                        PROPLE STORE PLATFORMS                          │
+├─────────────┬─────────────┬─────────────┬──────────────┬───────────────┤
+│   Android   │    Apple    │     Mac     │    Linux     │    Windows    │
+│  (.apk/.aab)│   (.ipa)    │ (.dmg/.pkg) │(.deb/.appimg)│  (.exe/.msi)  │
+└─────────────┴─────────────┴─────────────┴──────────────┴───────────────┘
+```
+
+| Icon | Platform | Minimum Target OS | Primary Packaging Formats |
+| :---: | :--- | :--- | :--- |
+| 🤖 | **Android** | Android 7.0 (Nougat)+ | `.apk` (Standard Package), `.aab` (Android App Bundle) |
+| 🍏 | **Apple (iOS / iPadOS)** | iOS / iPadOS 14.0+ | `.ipa` (Sideload & Enterprise Package) |
+| 🖥️ | **Mac (macOS)** | macOS 12.0 (Monterey)+ | `.dmg` (Disk Image), `.pkg` (Installer), `.zip` |
+| 🐧 | **Linux** | Universal Linux Kernel | `.deb` (Debian/Ubuntu), `.AppImage`, `.rpm` (Fedora/RHEL), `.flatpak` |
+| 🪟 | **Windows** | Windows 10, 11 (64-bit) | `.exe` (Win32/x64), `.msi` (MSI Installer), `.msix`, `.appx` |
+| 🌐 | **Web Applications** | Modern Standards | Progressive Web Apps (`.pwa`), Responsive Web Apps, Sandboxes |
+
+---
+
+## 🏛️ Architecture & Verification Flow
+
+```text
+[ Developer / Publisher ]
+           │
+           │  (1) Publishes Release Metadata & Direct Binary URL
+           ▼
+┌──────────────────────────────────────────────────────────┐
+│                   PROPLE STORE BACKEND                   │
+│                                                          │
+│  • Resolves format, size & SHA-256 Checksum              │
+│  • Enforces rate-limits (3 apps / 15m, 5 updates / 1h)   │
+│  • Validates Content Security & Safe Harbor Pointers     │
+└──────────────────────────────────────────────────────────┘
+           │
+           │  (2) Indexes into Authoritative Database & Meilisearch
+           ▼
+[ Discovery Client (Web / PWA / Mobile) ]
+           │
+           │  (3) User clicks "Install" or "Download"
+           ▼
+┌──────────────────────────────────────────────────────────┐
+│                HTTP 302 DIRECTORY POINTER                │
+│   (Zero bytes stored or proxy-streamed on Prople Store)  │
+└──────────────────────────────────────────────────────────┘
+           │
+           │  (4) Direct authenticated stream from Upstream Host
+           ▼
+[ Upstream CDN / GitHub Releases / AWS S3 / Cloudflare R2 ]
 ```
 
 ---
 
-## Quick Start
+## 🚀 Key Platform Features
+
+<details open>
+<summary><strong>🔍 Discovery & In-App Experience</strong></summary>
+
+- **Zero-Barrier Browsing**: Explore listings, Top Charts, categories, and full-text search with zero login walls.
+- **Contained Downloads**: Downloads start directly inside the app view without disruptive blank-tab redirects.
+- **Deep Search**: Instant sub-5ms fuzzy search powered by Meilisearch with client-side fallback index.
+- **Offline & PWA Resilience**: Service Worker background caching, app install prompt, and local persistence.
+</details>
+
+<details>
+<summary><strong>🛠️ Developer Console & Publishing</strong></summary>
+
+- **6-Step Release Wizard**: Step-by-step guidance covering binaries, media, permissions, and Data Safety.
+- **Universal Publisher Identity**: Single verified publisher name managed centrally in **Settings → Edit Profile** (30-min grace period, 15-day cooldown) with release-level anti-spoofing protection.
+- **Multi-Host Binary Sources**: Link files directly from AWS S3, Cloudflare R2, GitHub Releases, or self-hosted servers.
+- **Publishing Quotas**: Guarded by rate limiters to prevent catalog spam and automated abuse.
+</details>
+
+<details>
+<summary><strong>🔐 Security & Data Transparency</strong></summary>
+
+- **Complete Data Safety Disclosures**: Mandatory disclosures on collected data, shared data, and deletion policies.
+- **Categorized OS Permissions**: Clear explanations of requested system permissions before installation.
+- **Authentication**: 6-digit email OTP verification codes and Google OAuth integration.
+- **Defensive Engineering**: Built-in SSRF protection, strict CORS origin policies, and honeypot scrapers defense.
+</details>
+
+---
+
+## 🛠️ Tech Stack
+
+```text
+Frontend:       React 19 • TypeScript • Tailwind CSS v4 • Lucide Icons • Motion
+Backend:        Express 4.x • Node.js 22 • tsx • esbuild
+Database:       Supabase PostgreSQL (Authoritative Store)
+Search Engine:  Meilisearch (Full-text) with Local Fuzzy Match Fallback
+SEO & GEO:      Schema.org JSON-LD • OpenGraph • Sitemaps • /llms.txt Specification
+Security:       RFC 9116 security.txt • OWASP Headers • SHA-256 Integrity Verification
+```
+
+---
+
+## ⚡ Quick Start
 
 ### 1. Prerequisites
 
 - **Node.js**: `v20.x` or `v22.x` (recommended)
 - **npm**: `v10+`
 
-### 2. Clone & Install
+### 2. Installation
 
 ```bash
+# Clone the repository
 git clone https://github.com/sam-live2c/prople-apps-store-.git
 cd prople-apps-store-
+
+# Install dependencies
 npm install
 ```
 
-### 3. Configure Environment Variables
+### 3. Environment Setup
 
-Copy the example environment template:
+Copy the sample environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Configure your environment keys as required:
+Key configuration variables (all variables have safe local mock defaults if left blank):
 
 | Variable | Description |
 | :--- | :--- |
-| `FIREBASE_PROJECT_ID` | Your Firebase Project ID |
-| `FIREBASE_API_KEY` | Firebase Web API Key |
-| `FIREBASE_AUTH_DOMAIN` | Firebase Authentication Domain |
-| `FIREBASE_DATABASE_URL` | Firebase Realtime Database URL |
-| `AWS_ACCESS_KEY_ID` | AWS IAM Access Key for S3 storage (Optional) |
-| `AWS_SECRET_ACCESS_KEY` | AWS IAM Secret Access Key for S3 storage (Optional) |
-| `AWS_S3_BUCKET` | AWS S3 Bucket Name for media uploads |
-| `AWS_REGION` | AWS Region (e.g. `ap-south-1`) |
-| `RESEND_API_KEY` | Resend API Key for 2FA verification emails |
+| `SUPABASE_URL` | Supabase PostgreSQL project URL |
+| `SUPABASE_PUBLISHABLE_KEY` | Public publishable anonymous key for client RLS operations |
+| `SUPABASE_SECRET_KEY` | Server-side service key (never expose to client) |
+| `RESEND_API_KEY` | API key for transactional 2FA OTP verification emails |
 | `AUTH_EMAIL_FROM` | Sender address for transactional emails |
-| `SESSION_SECRET` | Secret key for signed challenge tokens |
 | `MEILISEARCH_HOST` | Meilisearch server host (Default: `http://localhost:7700`) |
 | `MEILISEARCH_ADMIN_KEY` | Meilisearch Master/Admin API key |
 
@@ -154,37 +183,86 @@ Configure your environment keys as required:
 npm run dev
 ```
 
-The application will start on **`http://localhost:3000`**.
+Visit **`http://localhost:3000`** in your browser.
 
-### 5. Build for Production
+### 5. Production Build
 
 ```bash
+# Compile client assets and bundle server
 npm run build
+
+# Start production server
 npm start
 ```
 
 ---
 
-## Security & Vulnerability Reporting
+## 📂 Project Organization
 
-Please review our [SECURITY.md](SECURITY.md) policy for instructions on coordinating vulnerability disclosures. Do not file public issues for security vulnerabilities.
+```text
+├── api/                       # Serverless API routes (Vercel & cloud functions)
+│   ├── apps.ts                # Catalog retrieval API
+│   ├── auth/[action].ts       # OTP 2FA and profile sync gateway
+│   ├── download-apk.ts        # Zero-byte 302 pointer redirect handler
+│   └── resolve-apk.ts         # Multi-host binary URL, format & cloud SHA-256 resolver
+├── docs/                      # Technical specifications & developer guides
+│   ├── PLATFORM_GUIDE.md      # Publishing, browsing & catalog standards
+│   ├── GOOD_FIRST_ISSUES.md   # Beginner starter challenges with acceptance criteria
+│   └── ADVANCED_CONTRIBUTOR_CHALLENGES.md # Advanced crypto, search & systems tasks
+├── public/                    # Static web assets & SEO manifests
+│   ├── manifest.webmanifest   # Progressive Web App manifest
+│   ├── robots.txt             # Search crawler directives & GEO permissions
+│   ├── sitemap.xml            # XML Sitemap index
+│   └── .well-known/           # RFC 9116 security.txt disclosure policy
+├── server/                    # Backend server infrastructure
+│   ├── authSecurity.ts        # Rate limiters & brute-force defense
+│   ├── emailAuth.ts           # Resend OTP delivery engine
+│   ├── meilisearch.ts         # Full-text search catalog sync
+│   ├── securityDefense.ts     # OWASP defense engine (SSRF, CORS, prototype pollution)
+│   └── supabase.ts            # Supabase PostgreSQL client & data mappings
+├── src/                       # Frontend application source
+│   ├── components/            # UI pages, sections, dialogs & navigation
+│   ├── context/               # React Context providers (Auth, Navigation, Install, Theme)
+│   ├── services/              # Client-side business logic & services
+│   ├── utils/                 # Security validators, algorithms & formatters
+│   ├── App.tsx                # Application shell & route router
+│   └── main.tsx               # Bootstrap & PWA service worker registration
+├── server.ts                  # Unified full-stack Express server
+└── package.json               # Manifest & build scripts
+```
 
 ---
 
-## Contributing
+## 🔒 Security & Vulnerability Disclosure
 
-We welcome community contributions from developers, designers, and security researchers worldwide!
+Security is a fundamental priority. If you discover a vulnerability, **please do not open a public GitHub issue**.
 
-- ⚡ **Zero-Config Setup**: Contribute to frontend and UI features with zero cloud API keys using our built-in offline mock mode.
-- 📖 [**Good First Issues**](docs/GOOD_FIRST_ISSUES.md): Check out small, well-scoped tasks with clear acceptance criteria.
-- 🗺️ [**Roadmap**](ROADMAP.md): Read our strategic milestones and active RFCs.
-- 📋 [**Contribution Guidelines**](CONTRIBUTING.md): Review our development setup, coding standards, and PR workflows.
-- 🤝 [**Code of Conduct**](CODE_OF_CONDUCT.md): Community behavioral standards.
+Please report vulnerabilities directly to our security response team:
+
+- **Security Team Email**: [cloaktailsupport@gmail.com](mailto:cloaktailsupport@gmail.com)
+- **Alternate Contact**: [cloaktailofficial@gmail.com](mailto:cloaktailofficial@gmail.com)
+- **RFC 9116 Disclosure**: [www.prople.co.in/.well-known/security.txt](https://www.prople.co.in/.well-known/security.txt)
+- Full details: [SECURITY.md](SECURITY.md)
 
 ---
 
-## License
+## 🤝 Contributing
 
-This project is licensed under the **Apache License, Version 2.0**. See the [LICENSE](LICENSE) file for details.
+We welcome community contributions! Here's how to get involved:
 
-Copyright &copy; 2026 **Cloaktail Industries** (Sahanur Molla). All rights reserved.
+- 🟢 [**Good First Issues**](docs/GOOD_FIRST_ISSUES.md) — Great starting points for new contributors.
+- 🗺️ [**Roadmap**](ROADMAP.md) — Future milestones and architectural RFCs.
+- 📖 [**Contributing Guide**](CONTRIBUTING.md) — Development setup, PR guidelines, and style rules.
+- 📜 [**Code of Conduct**](CODE_OF_CONDUCT.md) — Community expectations and inclusivity standards.
+
+---
+
+## 📄 License & Attribution
+
+This project is open-source under the **[Apache License 2.0](LICENSE)**.
+
+```text
+Copyright © 2026 Cloaktail Industries.
+Founder & Lead: Sahanur Molla
+All rights reserved.
+```
