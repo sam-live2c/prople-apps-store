@@ -1,8 +1,4 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, collection, getDocs } from 'firebase/firestore';
+import { fetchAppsFromSupabase } from '../server/supabase.ts';
 
 function slugifyAppName(name: string): string {
   return (name || '')
@@ -11,63 +7,6 @@ function slugifyAppName(name: string): string {
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
-}
-
-function getServerFirebaseConfig() {
-  let fileConfig: any = {};
-  const candidates: string[] = [path.join(process.cwd(), 'firebase-applet-config.json')];
-  try {
-    const currentDir = path.dirname(fileURLToPath(import.meta.url));
-    candidates.push(path.join(currentDir, '..', 'firebase-applet-config.json'));
-  } catch {}
-
-  for (const configPath of candidates) {
-    try {
-      if (fs.existsSync(configPath)) {
-        fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        break;
-      }
-    } catch {}
-  }
-
-  const isReal = (val?: string) =>
-    Boolean(
-      val &&
-      typeof val === 'string' &&
-      val.trim().length > 0 &&
-      !val.includes('example') &&
-      !val.includes('Placeholder') &&
-      !val.includes('0000000000')
-    );
-
-  const apiKey = process.env.FIREBASE_API_KEY || (isReal(fileConfig.apiKey) ? fileConfig.apiKey : '');
-  const projectId = process.env.FIREBASE_PROJECT_ID || (isReal(fileConfig.projectId) ? fileConfig.projectId : '');
-  const appId = process.env.FIREBASE_APP_ID || (isReal(fileConfig.appId) ? fileConfig.appId : '');
-  const authDomain =
-    process.env.FIREBASE_AUTH_DOMAIN ||
-    (isReal(fileConfig.authDomain) ? fileConfig.authDomain : projectId ? `${projectId}.firebaseapp.com` : '');
-  const firestoreDatabaseId =
-    process.env.FIRESTORE_DATABASE_ID ||
-    process.env.FIREBASE_DATABASE_ID ||
-    (isReal(fileConfig.firestoreDatabaseId) ? fileConfig.firestoreDatabaseId : '(default)');
-  const storageBucket =
-    process.env.FIREBASE_STORAGE_BUCKET ||
-    (isReal(fileConfig.storageBucket) ? fileConfig.storageBucket : projectId ? `${projectId}.firebasestorage.app` : '');
-  const messagingSenderId =
-    process.env.FIREBASE_MESSAGING_SENDER_ID || (isReal(fileConfig.messagingSenderId) ? fileConfig.messagingSenderId : '');
-
-  const isExampleConfig = !isReal(apiKey) || !isReal(projectId);
-
-  return {
-    projectId: projectId || 'example-prople-store',
-    appId: appId || '1:000000000000:web:0000000000000000000000',
-    apiKey: apiKey || 'AIzaSyExamplePlaceholderApiKey0000000000',
-    authDomain: authDomain || 'example-prople-store.firebaseapp.com',
-    firestoreDatabaseId: firestoreDatabaseId || 'example-firestore-database-id',
-    storageBucket: storageBucket || 'example-prople-store.firebasestorage.app',
-    messagingSenderId: messagingSenderId || '000000000000',
-    isExampleConfig,
-  };
 }
 
 const SITEMAP_BASE = 'https://www.prople.co.in';
@@ -105,16 +44,6 @@ function formatIsoDate(val: any, fallback: string): string {
   return fallback;
 }
 
-function getFirebaseDb() {
-  const fbConfig = getServerFirebaseConfig();
-  const existingApps = getApps();
-  const fbApp = existingApps.find(a => a.name === 'prople-sitemaps-client') || 
-    initializeApp(fbConfig, 'prople-sitemaps-client');
-  return fbConfig.firestoreDatabaseId && !fbConfig.firestoreDatabaseId.includes('example')
-    ? getFirestore(fbApp, fbConfig.firestoreDatabaseId)
-    : getFirestore(fbApp);
-}
-
 async function fetchAllPublishedApps(): Promise<any[]> {
   const now = Date.now();
   if (memoryAppsCache.length > 0 && now - lastCacheFetch < CACHE_TTL_MS) {
@@ -122,27 +51,19 @@ async function fetchAllPublishedApps(): Promise<any[]> {
   }
 
   try {
-    const db = getFirebaseDb();
-    const snap = await getDocs(collection(db, 'apps'));
-    const list: any[] = [];
-    snap.forEach(d => {
-      const data = d.data();
-      if (data.isPublished !== false) {
-        list.push({ id: d.id, ...data });
-      }
-    });
-
-    if (list.length > 0) {
+    const list = await fetchAppsFromSupabase(500);
+    if (list && list.length > 0) {
       memoryAppsCache = list;
       lastCacheFetch = now;
       return list;
     }
   } catch (err: any) {
-    console.warn('[Vercel Sitemap] Error fetching apps via Firebase SDK:', err?.message || err);
+    console.warn('[Vercel Sitemap] Error fetching apps via Supabase:', err?.message || err);
   }
 
   return memoryAppsCache;
 }
+
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Content-Type', 'application/xml; charset=utf-8');

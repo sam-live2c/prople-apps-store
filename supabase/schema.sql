@@ -142,14 +142,71 @@ CREATE TABLE IF NOT EXISTS public.banned_releases (
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 5. ROW LEVEL SECURITY (RLS) POLICIES
--- Enable RLS
+-- 5. NOTIFICATIONS TABLE
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  timestamp TEXT DEFAULT to_char(now(), 'Mon DD, YYYY'),
+  icon_url TEXT,
+  app_id TEXT,
+  action_type TEXT,
+  action_url TEXT,
+  action_label TEXT,
+  category TEXT DEFAULT 'general',
+  priority TEXT DEFAULT 'normal',
+  target_type TEXT DEFAULT 'all',
+  creator_uid TEXT,
+  is_unread BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON public.notifications (created_at DESC);
+
+-- 6. PUBLISHER REGISTRY TABLE
+CREATE TABLE IF NOT EXISTS public.publisher_registry (
+  id TEXT PRIMARY KEY, -- normalized publisher name
+  display_name TEXT NOT NULL,
+  owner_uid TEXT NOT NULL,
+  owner_email TEXT,
+  is_active BOOLEAN DEFAULT true,
+  claimed_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 7. ADMINS TABLE
+CREATE TABLE IF NOT EXISTS public.admins (
+  id TEXT PRIMARY KEY, -- UID or email
+  email TEXT UNIQUE NOT NULL,
+  role TEXT DEFAULT 'admin',
+  granted_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 8. SECURITY LOGS TABLE
+CREATE TABLE IF NOT EXISTS public.security_logs (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  ip TEXT NOT NULL,
+  email TEXT,
+  event_type TEXT NOT NULL,
+  reason TEXT,
+  user_agent TEXT,
+  timestamp BIGINT DEFAULT extract(epoch from now()) * 1000,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_logs_ip ON public.security_logs (ip);
+
+-- ROW LEVEL SECURITY (RLS) POLICIES
 ALTER TABLE public.apps ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.banned_releases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.publisher_registry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.security_logs ENABLE ROW LEVEL SECURITY;
 
--- Apps Policies: Public can read published apps; authenticated users / service role can insert/update
+-- Apps Policies
 DROP POLICY IF EXISTS "Public read published apps" ON public.apps;
 CREATE POLICY "Public read published apps" 
   ON public.apps FOR SELECT 
@@ -165,7 +222,7 @@ CREATE POLICY "Publishers update own apps"
   ON public.apps FOR UPDATE 
   USING (true);
 
--- Reviews Policies: Public can read non-flagged reviews; anyone can write reviews
+-- Reviews Policies
 DROP POLICY IF EXISTS "Public read reviews" ON public.reviews;
 CREATE POLICY "Public read reviews" 
   ON public.reviews FOR SELECT 
@@ -181,7 +238,7 @@ CREATE POLICY "Users update reviews"
   ON public.reviews FOR UPDATE 
   USING (true);
 
--- Profiles Policies: Public can read publisher profiles; users can update own profile
+-- Profiles Policies
 DROP POLICY IF EXISTS "Public read profiles" ON public.profiles;
 CREATE POLICY "Public read profiles" 
   ON public.profiles FOR SELECT 
@@ -192,8 +249,39 @@ CREATE POLICY "Users insert/update own profile"
   ON public.profiles FOR ALL 
   USING (true);
 
--- Banned Releases: Service role only
+-- Notifications Policies
+DROP POLICY IF EXISTS "Public read notifications" ON public.notifications;
+CREATE POLICY "Public read notifications"
+  ON public.notifications FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Service role manages notifications" ON public.notifications;
+CREATE POLICY "Service role manages notifications"
+  ON public.notifications FOR ALL
+  USING (auth.role() = 'service_role');
+
+-- Publisher Registry Policies
+DROP POLICY IF EXISTS "Public read publisher registry" ON public.publisher_registry;
+CREATE POLICY "Public read publisher registry"
+  ON public.publisher_registry FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Users manage publisher registry" ON public.publisher_registry;
+CREATE POLICY "Users manage publisher registry"
+  ON public.publisher_registry FOR ALL
+  USING (true);
+
+-- Admins & Security Logs Policies
+DROP POLICY IF EXISTS "Admins read" ON public.admins;
+CREATE POLICY "Admins read" ON public.admins FOR SELECT USING (true);
+
 DROP POLICY IF EXISTS "Service role manages bans" ON public.banned_releases;
 CREATE POLICY "Service role manages bans" 
   ON public.banned_releases FOR ALL 
   USING (auth.role() = 'service_role');
+
+DROP POLICY IF EXISTS "Service role manages logs" ON public.security_logs;
+CREATE POLICY "Service role manages logs"
+  ON public.security_logs FOR ALL
+  USING (auth.role() = 'service_role');
+

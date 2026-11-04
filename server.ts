@@ -5,25 +5,19 @@ import fs from "fs";
 import crypto from "crypto";
 import { Readable } from "stream";
 import { createServer as createViteServer } from "vite";
-import { initializeApp as initFirebaseApp } from "firebase/app";
 import { 
-  getFirestore as initFirestore, 
-  doc as serverDoc, 
-  getDoc as serverGetDoc, 
-  setDoc as serverSetDoc, 
-  updateDoc as serverUpdateDoc, 
-  deleteDoc as serverDeleteDoc,
-  collection as serverCollection,
-  getDocs as serverGetDocs,
-  query as serverQuery,
-  where as serverWhere,
-  limit as serverLimit,
-  setLogLevel
-} from "firebase/firestore";
-
-try {
-  setLogLevel('silent');
-} catch {}
+  serverDoc, 
+  serverGetDoc, 
+  serverSetDoc, 
+  serverUpdateDoc, 
+  serverDeleteDoc,
+  serverCollection,
+  serverGetDocs,
+  serverQuery,
+  serverWhere,
+  serverLimit,
+  serverSupabaseDb
+} from "./server/supabaseDb.ts";
 import {
   indexApp,
   indexApps,
@@ -86,7 +80,6 @@ import {
   BoundedIpRateLimiter,
   generateCrawlerTrapMazeHtml
 } from "./server/securityDefense.ts";
-import { getServerFirebaseConfig } from "./server/firebaseConfig.ts";
 import {
   bootstrapDefaultAdmins,
   isAuthorizedAdmin,
@@ -106,33 +99,30 @@ import {
   upsertProfileToSupabase
 } from "./server/supabase.ts";
 
-// Server-side Firestore initialization using secure environment or project configuration
-let serverDb: any = null;
+// Server-side database initialization using Supabase PostgreSQL store
+let serverDb: any = serverSupabaseDb;
 try {
-  const fbConfig = getServerFirebaseConfig();
-  if (fbConfig.projectId && !fbConfig.isExampleConfig) {
-    const fbApp = initFirebaseApp(fbConfig, "prople-store-server-backend");
-    serverDb = fbConfig.firestoreDatabaseId && !fbConfig.firestoreDatabaseId.includes("example")
-      ? initFirestore(fbApp, fbConfig.firestoreDatabaseId)
-      : initFirestore(fbApp);
-    console.log("[Backend] Firestore initialized with secure env config on DB:", fbConfig.firestoreDatabaseId || "(default)");
-    initAuthSecurity(serverDb);
-    initOtpStoreDb(serverDb);
-    bootstrapDefaultAdmins(serverDb).catch(() => {});
-    serverGetDoc(serverDoc(serverDb, "system_config", "resend")).then((snap: any) => {
-      if (snap && snap.exists()) {
-        const data = snap.data();
-        if (data?.apiKey) {
-          setRuntimeResendApiKey(data.apiKey);
-          console.log("[Backend] Loaded Resend API key from Firestore system_config");
-        }
+  initAuthSecurity(serverDb);
+  initOtpStoreDb(serverDb);
+  bootstrapDefaultAdmins(serverDb).catch(() => {});
+  checkSupabaseHealth().then(healthy => {
+    if (healthy) {
+      console.log("[Backend] Supabase connected and operational as authoritative database");
+    } else {
+      console.log("[Backend] Supabase running in local/proxy mode with in-memory persistence");
+    }
+  }).catch(() => {});
+  serverGetDoc(serverDoc(serverDb, "system_config", "resend")).then((snap: any) => {
+    if (snap && snap.exists()) {
+      const data = snap.data();
+      if (data?.apiKey) {
+        setRuntimeResendApiKey(data.apiKey);
+        console.log("[Backend] Loaded Resend API key from system_config");
       }
-    }).catch(() => {});
-  } else {
-    console.log("[Backend] Firebase running in standalone mode (set FIREBASE_PROJECT_ID and FIREBASE_API_KEY in .env for live cloud connection)");
-  }
+    }
+  }).catch(() => {});
 } catch (e: any) {
-  console.warn("[Backend] Failed to initialize Firestore on server:", e.message);
+  console.warn("[Backend] Database setup notice:", e.message);
 }
 
 // In-memory rate limiting state for server-side abuse prevention
@@ -1249,8 +1239,8 @@ async function startServer() {
   app.get("/api/storage/status", (_req, res) => {
     return res.json({
       success: true,
-      provider: "firebase",
-      projectId: getServerFirebaseConfig().projectId,
+      provider: "supabase",
+      projectId: process.env.SUPABASE_URL || "supabase",
     });
   });
 
@@ -1262,7 +1252,7 @@ async function startServer() {
       }
 
       if (dataUrl.startsWith("http://") || dataUrl.startsWith("https://")) {
-        return res.json({ success: true, url: dataUrl, provider: "firebase" });
+        return res.json({ success: true, url: dataUrl, provider: "supabase" });
       }
 
       const validation = validateImageSource(dataUrl, filename || "Upload Image");
@@ -1273,7 +1263,7 @@ async function startServer() {
       return res.json({
         success: true,
         url: dataUrl,
-        provider: "firebase",
+        provider: "supabase",
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
@@ -1662,20 +1652,6 @@ async function startServer() {
           const fbConfig = getServerFirebaseConfig();
           const fbKey = !fbConfig.isExampleConfig ? fbConfig.apiKey : "";
           if (fbKey) {
-            const fbRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=${fbKey}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ oobCode: String(code).trim(), newPassword }),
-            });
-            if (fbRes.ok) {
-              verification = { valid: true };
-            }
-          }
-        } catch (oobErr: any) {
-          console.warn("[Auth API] oobCode verification notice:", oobErr?.message);
-        }
-      }
-
       if (!verification.valid) {
         const strikeRes = await registerFailedSecurityEvent(serverDb, {
           ip,
@@ -1698,22 +1674,25 @@ async function startServer() {
 
       const pwdHash = hashPassword(newPassword);
 
-      // Persist password hash in high-availability distributed store (RTDB + Memory)
+      // Persist password hash in high-availability distributed store (Memory + DB)
       await persistUserPasswordHash(cleanEmail, pwdHash);
 
-      // Attempt to provision or update user in Firebase Auth via Identity Toolkit
+      // Attempt to provision or update user in Supabase Auth
       try {
-        const fbConfig = getServerFirebaseConfig();
-        if (!fbConfig.isExampleConfig && fbConfig.apiKey) {
-          await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${fbConfig.apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: cleanEmail, password: newPassword, returnSecureToken: true }),
-            signal: AbortSignal.timeout(4000),
-          });
-        }
-      } catch (fbSyncErr: any) {
-        console.warn("[Auth API] Firebase user provision notice:", fbSyncErr.message);
+        const client = getSupabaseAdminClient();
+        await client.auth.admin.createUser({
+          email: cleanEmail,
+          password: newPassword,
+          email_confirm: true
+        }).catch(async () => {
+          const { data: usersData } = await client.auth.admin.listUsers();
+          const existingUser = usersData?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
+          if (existingUser?.id) {
+            await client.auth.admin.updateUserById(existingUser.id, { password: newPassword });
+          }
+        });
+      } catch (sbSyncErr: any) {
+        console.warn("[Auth API] Supabase user provision notice:", sbSyncErr.message);
       }
 
       // Check if user document already exists in Firestore by email
@@ -1799,19 +1778,26 @@ async function startServer() {
       const pwdHash = hashPassword(password);
       await persistUserPasswordHash(cleanEmail, pwdHash);
 
-      // Attempt to provision in Firebase Auth via Identity Toolkit (non-blocking if not allowed)
+      // Attempt to provision in Supabase Auth (non-blocking if not allowed)
       try {
-        const fbConfig = getServerFirebaseConfig();
-        if (!fbConfig.isExampleConfig && fbConfig.apiKey) {
-          await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${fbConfig.apiKey}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: cleanEmail, password, displayName: cleanName, returnSecureToken: true }),
-            signal: AbortSignal.timeout(4000),
-          });
-        }
-      } catch (fbSyncErr: any) {
-        console.warn("[Auth API] Firebase user provision notice:", fbSyncErr.message);
+        const client = getSupabaseAdminClient();
+        await client.auth.admin.createUser({
+          email: cleanEmail,
+          password: password,
+          email_confirm: true,
+          user_metadata: { full_name: cleanName }
+        }).catch(async () => {
+          const { data: usersData } = await client.auth.admin.listUsers();
+          const existingUser = usersData?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
+          if (existingUser?.id) {
+            await client.auth.admin.updateUserById(existingUser.id, {
+              password: password,
+              user_metadata: { full_name: cleanName }
+            });
+          }
+        });
+      } catch (sbSyncErr: any) {
+        console.warn("[Auth API] Supabase user provision notice:", sbSyncErr.message);
       }
 
       // Create / update Firestore document with serverDb
@@ -1972,40 +1958,32 @@ async function startServer() {
         });
       }
 
-      // 2. Also check if valid via Identity Toolkit REST API
+      // 2. Also check if valid via Supabase Auth
       try {
-        const fbConfig = getServerFirebaseConfig();
-        if (!fbConfig.isExampleConfig && fbConfig.apiKey) {
-          const idtRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${fbConfig.apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: cleanEmail, password: String(password), returnSecureToken: true }),
-            signal: AbortSignal.timeout(4000),
-          });
-            if (idtRes.ok) {
-              const idtData = await idtRes.json();
-              if (idtData && idtData.localId) {
-                // Successful login: reset failed login attempts and cache PBKDF2 hash for instant 2FA verification
-                recordSuccessfulLogin(cleanEmail);
-                try {
-                  await persistUserPasswordHash(cleanEmail, hashPassword(String(password)));
-                } catch {}
+        const client = getSupabaseAdminClient();
+        const { data: sbData, error: sbErr } = await client.auth.signInWithPassword({
+          email: cleanEmail,
+          password: String(password)
+        });
+        if (sbData?.user && !sbErr) {
+          recordSuccessfulLogin(cleanEmail);
+          try {
+            await persistUserPasswordHash(cleanEmail, hashPassword(String(password)));
+          } catch {}
 
-                return res.json({
-                  success: true,
-                  user: {
-                    uid: idtData.localId,
-                    email: cleanEmail,
-                    displayName: "",
-                    publisherName: "",
-                    isEmailVerified: Boolean(idtData.emailVerified),
-                  }
-                });
-              }
+          return res.json({
+            success: true,
+            user: {
+              uid: sbData.user.id,
+              email: cleanEmail,
+              displayName: (sbData.user.user_metadata?.full_name || '').trim(),
+              publisherName: (sbData.user.user_metadata?.full_name || '').trim(),
+              isEmailVerified: Boolean(sbData.user.email_confirmed_at),
             }
-          }
-        } catch (idtErr: any) {
-        console.warn("[Auth API] Identity Toolkit fallback notice:", idtErr.message);
+          });
+        }
+      } catch (sbErr: any) {
+        console.warn("[Auth API] Supabase verify notice:", sbErr.message);
       }
 
       // Register failed password attempt strike

@@ -1,6 +1,6 @@
-import { doc, getDoc, collection, onSnapshot, getDocs } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { supabase } from '../utils/supabase';
 import { UserProfile, AppDetails } from '../types';
+
 
 export type AdminAction =
   | 'DELETE_APP'
@@ -93,42 +93,29 @@ export function initAdminPermissionsSync() {
   });
 
   try {
-    if (!db) return;
-    onSnapshot(collection(db, 'admins'), (snapshot) => {
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        const idKey = docSnap.id.toLowerCase().trim();
-        const extractedEmail = (
-          data.email || 
-          data.accountEmail || 
-          data.userEmail || 
-          (docSnap.id.includes('@') ? docSnap.id : '')
-        ).toLowerCase().trim();
-        const uid = (data.uid || (!docSnap.id.includes('@') ? docSnap.id : '')).trim();
-
-        const record: AdminAccountRecord = {
-          uid: uid || undefined,
-          email: extractedEmail || idKey,
-          role: 'Store Administrator',
-          permissions: ALL_ADMIN_ACTIONS,
-          grantedAt: data.grantedAt || data.createdAt || new Date().toISOString(),
-          isActive: data.isActive !== false
-        };
-
-        if (extractedEmail) dynamicAdminsByEmail.set(extractedEmail, record);
-        if (uid) dynamicAdminsByUid.set(uid, record);
-        dynamicAdminsByEmail.set(idKey, record);
-        const sanitizedKey = extractedEmail ? extractedEmail.replace(/[^a-zA-Z0-9_-]/g, '_') : '';
-        if (sanitizedKey) dynamicAdminsByEmail.set(sanitizedKey, record);
-      });
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('admin:permissions:updated'));
+    supabase.from('admins').select('*').then(({ data }) => {
+      if (Array.isArray(data)) {
+        data.forEach(item => {
+          const email = (item.email || item.id || '').toLowerCase().trim();
+          const uid = (item.uid || item.id || '').trim();
+          const record: AdminAccountRecord = {
+            uid: uid || undefined,
+            email: email,
+            role: (item.role as any) || 'Store Administrator',
+            permissions: ALL_ADMIN_ACTIONS,
+            grantedAt: item.granted_at || new Date().toISOString(),
+            isActive: true
+          };
+          if (email) dynamicAdminsByEmail.set(email, record);
+          if (uid) dynamicAdminsByUid.set(uid, record);
+        });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('admin:permissions:updated'));
+        }
       }
-    }, (err) => {
-      console.warn('[AdminPermissionsService] Firestore admins sync notice:', err);
-    });
+    }).catch(() => {});
   } catch (err) {
-    console.warn('[AdminPermissionsService] Init listener notice:', err);
+    console.warn('[AdminPermissionsService] Init Supabase admin notice:', err);
   }
 }
 

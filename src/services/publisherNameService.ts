@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { doc, getDoc, setDoc, collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { supabase } from '../utils/supabase';
+
 import { safeFetchJson } from '../utils/safeFetch';
 import { AppDetails } from '../types';
 import { DEFAULT_ADMIN_EMAILS } from './adminPermissionsService';
@@ -104,32 +104,29 @@ export async function checkPublisherNameAvailability(
     return nameCheckCache.get(cacheKey)!;
   }
 
-  // Authoritative client-side Firestore publisher_registry check (public read allowed by firestore.rules)
-  if (cleanAlpha && db) {
+  // Authoritative client-side Supabase publisher_registry check
+  if (cleanAlpha) {
     try {
-      const regSnap = await getDoc(doc(db, 'publisher_registry', cleanAlpha));
-      if (regSnap.exists()) {
-        const regData = regSnap.data();
-        if (regData && regData.isActive !== false) {
-          const curUid = (options?.currentUserId || auth.currentUser?.uid || '').trim();
-          const curEmail = (options?.currentUserEmail || auth.currentUser?.email || '').toLowerCase().trim();
-          const regUid = (regData.ownerUid || regData.userId || '').trim();
-          const regEmail = (regData.ownerEmail || '').toLowerCase().trim();
+      const { data } = await supabase.from('publisher_registry').select('*').eq('id', cleanAlpha).maybeSingle();
+      if (data && data.is_active !== false) {
+        const curUid = (options?.currentUserId || '').trim();
+        const curEmail = (options?.currentUserEmail || '').toLowerCase().trim();
+        const regUid = (data.owner_uid || '').trim();
+        const regEmail = (data.owner_email || '').toLowerCase().trim();
 
-          const isSameOwner = Boolean(
-            (curUid && regUid && curUid === regUid) ||
-            (curEmail && regEmail && curEmail === regEmail)
-          );
+        const isSameOwner = Boolean(
+          (curUid && regUid && curUid === regUid) ||
+          (curEmail && regEmail && curEmail === regEmail)
+        );
 
-          if (!isSameOwner) {
-            const takenResult: PublisherNameCheckResult = {
-              available: false,
-              isTaken: true,
-              message: `The publisher name "${trimmed}" is already claimed by another developer.`
-            };
-            nameCheckCache.set(cacheKey, takenResult);
-            return takenResult;
-          }
+        if (!isSameOwner) {
+          const takenResult: PublisherNameCheckResult = {
+            available: false,
+            isTaken: true,
+            message: `The publisher name "${trimmed}" is already claimed by another developer.`
+          };
+          nameCheckCache.set(cacheKey, takenResult);
+          return takenResult;
         }
       }
     } catch (regErr) {
@@ -429,94 +426,21 @@ export async function propagatePublisherNameToAllReleases(
 
   let updatedCount = 0;
 
-  // 2. Direct authenticated client Firestore batch update on all owned apps (authorized by firestore.rules)
-  if (db && auth.currentUser) {
-    try {
-      const appsCol = collection(db, 'apps');
-      const matchedDocs = new Map<string, any>();
-
-      const queries = [];
-      if (curUid) {
-        queries.push(getDocs(query(appsCol, where('owner', '==', curUid))));
-        queries.push(getDocs(query(appsCol, where('developerId', '==', curUid))));
-        queries.push(getDocs(query(appsCol, where('creatorUid', '==', curUid))));
-      }
-      if (curEmail) {
-        queries.push(getDocs(query(appsCol, where('developerEmail', '==', curEmail))));
-        queries.push(getDocs(query(appsCol, where('ownerEmail', '==', curEmail))));
-        queries.push(getDocs(query(appsCol, where('publisherEmail', '==', curEmail))));
-      }
-
-      const snapshots = await Promise.allSettled(queries);
-      for (const res of snapshots) {
-        if (res.status === 'fulfilled' && res.value) {
-          res.value.forEach((docSnap) => {
-            if (!matchedDocs.has(docSnap.id)) {
-              matchedDocs.set(docSnap.id, docSnap.data());
-            }
-          });
-        }
-      }
-
-      if (matchedDocs.size > 0) {
-        const entries = Array.from(matchedDocs.entries());
-        const nowIso = new Date().toISOString();
-
-        // Commit in chunks of 400 (well within Firestore's 500-op batch limit)
-        for (let i = 0; i < entries.length; i += 400) {
-          const slice = entries.slice(i, i + 400);
-          const batch = writeBatch(db);
-          for (const [appId, data] of slice) {
-            const appRef = doc(db, 'apps', appId);
-            const updatedDevInfo = data?.developerInfo && typeof data.developerInfo === 'object'
-              ? { ...data.developerInfo, publisherName: cleanName }
-              : { publisherName: cleanName, email: curEmail || data?.developerEmail || '' };
-
-            // Strictly touch only non-admin publisher identity fields so firestore.rules always permits the write
-            batch.set(
-              appRef,
-              {
-                developer: cleanName,
-                publisherName: cleanName,
-                publishedBy: cleanName,
-                developerInfo: updatedDevInfo,
-                updatedAt: nowIso
-              },
-              { merge: true }
-            );
-            updatedCount++;
-          }
-          await batch.commit();
-        }
-      }
-
-      // Release previous registry slug if the user switched away from an old name they owned
-      const prevAlpha = (previousName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-      const newAlpha = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (prevAlpha && prevAlpha !== newAlpha) {
-        try {
-          const oldRegRef = doc(db, 'publisher_registry', prevAlpha);
-          const oldRegSnap = await getDoc(oldRegRef);
-          if (oldRegSnap.exists()) {
-            const oldData = oldRegSnap.data();
-            const oldUid = (oldData?.ownerUid || oldData?.userId || '').trim();
-            const oldEmail = (oldData?.ownerEmail || '').toLowerCase().trim();
-            if ((curUid && oldUid === curUid) || (curEmail && oldEmail === curEmail)) {
-              await setDoc(
-                oldRegRef,
-                {
-                  isActive: false,
-                  updatedAt: new Date().toISOString()
-                },
-                { merge: true }
-              );
-            }
-          }
-        } catch {}
-      }
-    } catch (err) {
-      console.warn('[PublisherNameService] Client apps propagation notice:', err);
+  // 2. Direct Supabase update on all owned apps
+  try {
+    const updatePayload = {
+      developer: cleanName,
+      publisher_name: cleanName,
+      published_by: cleanName,
+      updated_at: new Date().toISOString()
+    };
+    if (curUid) {
+      await supabase.from('apps').update(updatePayload).or(`owner.eq.${curUid},developer_id.eq.${curUid}`);
+    } else if (curEmail) {
+      await supabase.from('apps').update(updatePayload).eq('developer_email', curEmail);
     }
+  } catch (err) {
+    console.warn('[PublisherNameService] Client apps propagation notice:', err);
   }
 
   // 3. Notify backend to flush server catalog / SEO / Meilisearch caches
@@ -628,60 +552,37 @@ export async function claimPublisherName(
   // Preserve the claimed name immediately in local storage so it survives logout and tab closing
   setPreservedClaimedName(trimmed);
 
-  const curUid = (auth.currentUser?.uid || userId || getOrCreateGuestUid()).trim();
-  const curEmail = (auth.currentUser?.email || userEmail || '').toLowerCase().trim();
+  const curUid = (userId || getOrCreateGuestUid()).trim();
+  const curEmail = (userEmail || '').toLowerCase().trim();
 
   let clientClaimed = false;
 
-  // 1. Direct authenticated client Firestore write (authorized under firestore.rules when auth.currentUser is active)
+  // 1. Direct client Supabase write
   try {
-    if (auth.currentUser && curUid && db) {
-      const regDocRef = doc(db, 'publisher_registry', cleanAlpha);
-      const existingRegSnap = await getDoc(regDocRef);
-      if (existingRegSnap.exists()) {
-        const regData = existingRegSnap.data();
-        if (regData && regData.isActive !== false) {
-          const regUid = (regData.ownerUid || regData.userId || '').trim();
-          const regEmail = (regData.ownerEmail || '').toLowerCase().trim();
-          const isSameOwner = Boolean(
-            (curUid && regUid && curUid === regUid) ||
-            (curEmail && regEmail && curEmail === regEmail)
-          );
-          if (!isSameOwner) {
-            return {
-              success: false,
-              message: `The publisher name "${trimmed}" is already claimed by another developer.`
-            };
-          }
-        }
-      }
+    if (curUid) {
+      await supabase.from('publisher_registry').upsert({
+        id: cleanAlpha,
+        display_name: trimmed,
+        owner_uid: curUid,
+        owner_email: curEmail || '',
+        is_active: true,
+        claimed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
 
-      await setDoc(regDocRef, {
-        normalizedName: cleanAlpha,
-        displayName: trimmed,
-        ownerUid: curUid,
-        userId: curUid,
-        ownerEmail: curEmail || '',
-        claimedAt: new Date().toISOString(),
-        isActive: true,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-
-      const userDocRef = doc(db, 'users', curUid);
-      await setDoc(userDocRef, {
-        publisherName: trimmed,
-        displayName: trimmed,
-        isPublisher: true,
-        nameResetVersion: 'fresh_start_v1',
-        lastNameChangedAt: timestamps?.lastNameChangedAt || Date.now(),
-        nameChangeSessionStartedAt: timestamps?.nameChangeSessionStartedAt || Date.now(),
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+      await supabase.from('profiles').upsert({
+        id: curUid,
+        email: curEmail,
+        display_name: trimmed,
+        publisher_name: trimmed,
+        is_publisher: true,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
 
       clientClaimed = true;
     }
   } catch (clientErr: any) {
-    console.warn('[PublisherNameService] Client direct claim notice:', clientErr);
+    console.warn('[PublisherNameService] Client Supabase claim notice:', clientErr?.message);
   }
 
   // 2. Propagate updated publisher name across all releases immediately
@@ -689,7 +590,8 @@ export async function claimPublisherName(
 
   // 3. Server registry endpoint notification
   try {
-    const idToken = await auth.currentUser?.getIdToken?.().catch(() => null);
+    const { data: { session } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+    const idToken = session?.access_token || null;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
 

@@ -520,3 +520,211 @@ export async function getSupabaseDiagnostics(): Promise<{
     auth,
   };
 }
+
+/**
+ * Delete an app from Supabase
+ */
+export async function deleteAppFromSupabase(appId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = getSupabaseAdminClient();
+    const { error } = await client.from('apps').delete().eq('id', appId);
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Delete a review from Supabase
+ */
+export async function deleteReviewFromSupabase(reviewId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = getSupabaseAdminClient();
+    const { error } = await client.from('reviews').delete().eq('id', reviewId);
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Fetch notifications from Supabase
+ */
+export async function fetchNotificationsFromSupabase(limit = 100): Promise<any[]> {
+  try {
+    const client = getSupabaseAdminClient();
+    const { data, error } = await client
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error || !data) return [];
+    return data.map((n: any) => ({
+      id: n.id,
+      title: n.title,
+      message: n.message,
+      iconUrl: n.icon_url,
+      appId: n.app_id,
+      actionType: n.action_type,
+      actionUrl: n.action_url,
+      actionLabel: n.action_label,
+      isUnread: n.is_unread,
+      createdAt: n.created_at ? new Date(n.created_at).getTime() : Date.now(),
+      category: n.category,
+      targetType: n.target_type,
+      targetUid: n.target_uid,
+      targetUserName: n.target_user_name,
+      targetEmail: n.target_email,
+      publisherAppId: n.publisher_app_id,
+      publisherUid: n.publisher_uid,
+      publisherEmail: n.publisher_email,
+      publisherName: n.publisher_name
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Insert or upsert a notification in Supabase
+ */
+export async function insertNotificationToSupabase(notification: any): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = getSupabaseAdminClient();
+    const { error } = await client.from('notifications').upsert({
+      id: notification.id || `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title: notification.title || '',
+      message: notification.message || '',
+      icon_url: notification.iconUrl || null,
+      app_id: notification.appId || null,
+      action_type: notification.actionType || null,
+      action_url: notification.actionUrl || null,
+      action_label: notification.actionLabel || null,
+      is_unread: notification.isUnread !== false,
+      category: notification.category || null,
+      target_type: notification.targetType || 'all',
+      target_uid: notification.targetUid || null,
+      target_user_name: notification.targetUserName || null,
+      target_email: notification.targetEmail || null,
+      publisher_app_id: notification.publisherAppId || null,
+      publisher_uid: notification.publisherUid || null,
+      publisher_email: notification.publisherEmail || null,
+      publisher_name: notification.publisherName || null,
+      created_at: notification.createdAt ? new Date(notification.createdAt).toISOString() : new Date().toISOString()
+    }, { onConflict: 'id' });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Delete a notification from Supabase
+ */
+export async function deleteNotificationFromSupabase(notificationId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = getSupabaseAdminClient();
+    const { error } = await client.from('notifications').delete().eq('id', notificationId);
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Check publisher name availability in Supabase
+ */
+export async function checkPublisherNameAvailabilityInSupabase(
+  publisherName: string,
+  userUid?: string,
+  userEmail?: string
+): Promise<{ available: boolean; claimedBy?: string; isOwner?: boolean }> {
+  try {
+    const client = getSupabaseAdminClient();
+    const clean = publisherName.trim().toLowerCase();
+    const { data, error } = await client
+      .from('publisher_registry')
+      .select('*')
+      .eq('name_lower', clean)
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) {
+      return { available: true };
+    }
+
+    const isOwner = Boolean(
+      (userUid && data.owner_uid === userUid) ||
+      (userEmail && data.owner_email && data.owner_email.toLowerCase() === userEmail.toLowerCase())
+    );
+
+    return {
+      available: isOwner,
+      claimedBy: data.publisher_name,
+      isOwner
+    };
+  } catch {
+    return { available: true };
+  }
+}
+
+/**
+ * Claim publisher name in Supabase
+ */
+export async function claimPublisherNameInSupabase(
+  publisherName: string,
+  ownerUid: string,
+  email: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const client = getSupabaseAdminClient();
+    const clean = publisherName.trim().toLowerCase();
+    const { error } = await client.from('publisher_registry').upsert({
+      name_lower: clean,
+      publisher_name: publisherName.trim(),
+      owner_uid: ownerUid,
+      owner_email: email.trim().toLowerCase(),
+      claimed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'name_lower' });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Insert security audit log into Supabase
+ */
+export async function insertSecurityLogToSupabase(log: any): Promise<void> {
+  try {
+    const client = getSupabaseAdminClient();
+    await client.from('security_logs').insert({
+      event: log.event || 'SECURITY_EVENT',
+      severity: log.severity || 'low',
+      ip: log.ip || null,
+      email: log.email || null,
+      details: log.details || {},
+      created_at: new Date().toISOString()
+    });
+  } catch {}
+}
+
