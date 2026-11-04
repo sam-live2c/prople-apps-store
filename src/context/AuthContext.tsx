@@ -15,10 +15,19 @@ import {
   linkWithPopup,
   linkWithCredential,
   AuthCredential,
-  unlink
-} from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp, collection, query, where, getDocs, limit } from 'firebase/firestore';
-import { auth, db } from '../firebase';
+  unlink,
+  doc, 
+  getDoc, 
+  setDoc, 
+  serverTimestamp, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  limit,
+  auth, 
+  db 
+} from '../firebase';
 import { supabase } from '../utils/supabase';
 import { UserProfile, DeveloperKeystore } from '../types';
 import { generateDeveloperKeystore } from '../services/keystoreService';
@@ -1650,7 +1659,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // If code is a Firebase oobCode (from Firebase action link), confirm directly with Firebase Auth
       if (cleanCode.length > 8 || !/^\d{6}$/.test(cleanCode)) {
         try {
-          const { confirmPasswordReset } = await import('firebase/auth');
+          const { confirmPasswordReset } = await import('../firebase');
           await confirmPasswordReset(auth, cleanCode, newPassword);
         } catch (oobErr: any) {
           console.warn('[AuthContext] confirmPasswordReset notice:', oobErr?.message);
@@ -1679,10 +1688,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const verifiedUser = data.user;
 
-      // If user is logged into Firebase, also update Firebase password
+      // If user is logged into session, also update session password
       if (auth.currentUser && auth.currentUser.email === cleanEmail) {
         try {
-          const { updatePassword } = await import('firebase/auth');
+          const { updatePassword } = await import('../firebase');
           await updatePassword(auth.currentUser, newPassword);
         } catch {}
       }

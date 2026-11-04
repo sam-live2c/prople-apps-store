@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../utils/supabase';
-
+import { auth } from '../firebase';
 import { safeFetchJson } from '../utils/safeFetch';
 import { AppDetails } from '../types';
 import { DEFAULT_ADMIN_EMAILS } from './adminPermissionsService';

@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { Resend } from 'resend';
+import { getSupabaseAdminClient } from './supabase.ts';
 
 function escapeHtmlEmail(str: string): string {
   if (!str) return '';
@@ -427,77 +428,36 @@ export function renderFirebaseHtmlTemplate(type: 'reset-password' | 'verify-emai
 }
 
 /**
- * Dispatches an email using Google Firebase Identity Toolkit REST API.
- * This guarantees reliable email delivery directly via Firebase's authorized email infrastructure
- * without requiring any third-party email provider keys.
- * Handles both PASSWORD_RESET and EMAIL_SIGNIN/VERIFY_EMAIL gracefully.
+ * Dispatches an authentication link using Supabase Auth.
  */
-export async function sendFirebaseOobCode(
+export async function sendSupabaseAuthLink(
   requestType: 'PASSWORD_RESET' | 'VERIFY_EMAIL' | 'EMAIL_SIGNIN',
   email: string,
-  continueUrl: string,
-  idToken?: string
+  continueUrl: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { getServerFirebaseConfig } = await import("./firebaseConfig.ts");
-    const fbConfig = getServerFirebaseConfig();
-    const apiKey = !fbConfig.isExampleConfig ? fbConfig.apiKey : "";
-
-    if (!apiKey) {
-      return { success: false, error: 'Firebase service is temporarily unreachable' };
+    const client = getSupabaseAdminClient();
+    if (requestType === 'PASSWORD_RESET') {
+      const { error } = await client.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+        redirectTo: continueUrl
+      });
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    } else {
+      const { error } = await client.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: { emailRedirectTo: continueUrl }
+      });
+      if (error) return { success: false, error: error.message };
+      return { success: true };
     }
-
-    // Prepare body: if VERIFY_EMAIL without an idToken, fallback to EMAIL_SIGNIN
-    // which dispatches a verified authentication link directly to the email.
-    let fbRequestType: string = requestType;
-    const bodyPayload: any = {
-      email: email.trim().toLowerCase(),
-      continueUrl,
-    };
-
-    if (requestType === 'VERIFY_EMAIL') {
-      if (idToken) {
-        fbRequestType = 'VERIFY_EMAIL';
-        bodyPayload.idToken = idToken;
-        delete bodyPayload.email;
-      } else {
-        fbRequestType = 'EMAIL_SIGNIN';
-      }
-    }
-
-    bodyPayload.requestType = fbRequestType;
-
-    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(bodyPayload),
-    });
-
-    const data = await res.json();
-    if (!res.ok) {
-      const fbMsg = data?.error?.message || 'Failed to dispatch email';
-      if (typeof fbMsg === 'string' && fbMsg.includes('UNAUTHORIZED_DOMAIN')) {
-        const authDomain = process.env.FIREBASE_AUTH_DOMAIN || 'prople-store-3efed.firebaseapp.com';
-        bodyPayload.continueUrl = `https://${authDomain}`;
-        try {
-          const retryRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(bodyPayload),
-          });
-          const retryData = await retryRes.json();
-          if (retryRes.ok) {
-            return { success: true };
-          }
-        } catch {}
-      }
-      return { success: false, error: fbMsg };
-    }
-    return { success: true };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
 }
+
+// Backward-compatibility alias
+export const sendFirebaseOobCode = sendSupabaseAuthLink;
 
 export async function sendOtpEmail(
   email: string, 

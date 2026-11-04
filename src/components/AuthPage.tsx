@@ -316,8 +316,7 @@ export default function AuthPage({ onClose, onSuccess, initialMode = 'signin' }:
       if (isResetMode) {
         if (emailParam) {
           setEmail(decodeURIComponent(emailParam));
-        } else if (searchParams.get('oobCode')) {
-          import('firebase/auth').then(({ verifyPasswordResetCode }) => {
+          import('../firebase').then(({ verifyPasswordResetCode }) => {
             verifyPasswordResetCode(auth, searchParams.get('oobCode')!)
               .then((userEmail) => {
                 if (userEmail) setEmail(userEmail);

@@ -11,9 +11,10 @@ import {
   orderBy, 
   limit,
   serverTimestamp,
-  writeBatch
-} from 'firebase/firestore';
-import { db, auth } from '../firebase';
+  writeBatch,
+  db, 
+  auth 
+} from '../firebase';
 import { NotificationItem, NotificationCategory, AppDetails, UserProfile } from '../types';
 import { appDetailsMock } from '../data';
 

@@ -12,9 +12,10 @@ import {
   orderBy, 
   serverTimestamp,
   arrayUnion,
-  arrayRemove 
-} from 'firebase/firestore';
-import { db, auth } from '../firebase';
+  arrayRemove,
+  db, 
+  auth 
+} from '../firebase';
 import { AppDetails, Review, AppListing, DeveloperConsoleConfig } from '../types';
 import { appDetailsMock, featuredApp } from '../data';
 import { notifyAppPublished, notifyAppUpdated } from './firestoreNotificationService';

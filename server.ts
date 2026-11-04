@@ -85,7 +85,7 @@ import {
   isAuthorizedAdmin,
   hasAdminPermission
 } from "./server/adminPermissions.ts";
-import { authenticateApiRequest } from "./server/tokenVerifier.ts";
+import { authenticateApiRequest, verifySupabaseToken } from "./server/tokenVerifier.ts";
 import {
   getSupabaseAdminClient,
   checkSupabaseHealth,
@@ -549,7 +549,7 @@ async function startServer() {
     // Allow AI Studio, device testing tools, and responsive previewers to embed the website
     const frameAncestors = "'self' * https://*.run.app https://*.google.com https://*.googleusercontent.com https://*.aistudio.google.com";
 
-    const scriptSrc = "script-src 'self' 'unsafe-inline' https://apis.google.com https://*.firebaseio.com https://*.googleapis.com https://www.youtube.com https://s.ytimg.com";
+    const scriptSrc = "script-src 'self' 'unsafe-inline' https://apis.google.com https://*.googleapis.com https://www.youtube.com https://s.ytimg.com";
 
     res.setHeader(
       'Content-Security-Policy',
@@ -1646,12 +1646,6 @@ async function startServer() {
       const clientChallengeToken = bodyToken || req.headers["x-challenge-token"];
       let verification = await verifyStoredOtp(cleanEmail, String(code), true, typeof clientChallengeToken === "string" ? clientChallengeToken : undefined);
 
-      // If code is not in OTP store, check if it is a Firebase oobCode from email action link
-      if (!verification.valid && (String(code).length > 8 || !/^\d{6}$/.test(String(code).trim()))) {
-        try {
-          const fbConfig = getServerFirebaseConfig();
-          const fbKey = !fbConfig.isExampleConfig ? fbConfig.apiKey : "";
-          if (fbKey) {
       if (!verification.valid) {
         const strikeRes = await registerFailedSecurityEvent(serverDb, {
           ip,
@@ -1686,7 +1680,7 @@ async function startServer() {
           email_confirm: true
         }).catch(async () => {
           const { data: usersData } = await client.auth.admin.listUsers();
-          const existingUser = usersData?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
+          const existingUser = (usersData?.users as any[])?.find((u: any) => u.email?.toLowerCase() === cleanEmail);
           if (existingUser?.id) {
             await client.auth.admin.updateUserById(existingUser.id, { password: newPassword });
           }
@@ -1788,7 +1782,7 @@ async function startServer() {
           user_metadata: { full_name: cleanName }
         }).catch(async () => {
           const { data: usersData } = await client.auth.admin.listUsers();
-          const existingUser = usersData?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
+          const existingUser = (usersData?.users as any[])?.find((u: any) => u.email?.toLowerCase() === cleanEmail);
           if (existingUser?.id) {
             await client.auth.admin.updateUserById(existingUser.id, {
               password: password,
@@ -2739,34 +2733,13 @@ async function startServer() {
         });
       }
 
-      let deletedFromFirestore = false;
-      const bearerToken = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim() || req.body?.idToken || req.query?.idToken;
-
+      let deletedFromDb = false;
       try {
         await serverDeleteDoc(appRef);
-        deletedFromFirestore = true;
+        deletedFromDb = true;
       } catch (delErr: any) {
-        // 1. If unauthenticated client SDK is blocked by cloud security rules, try REST API with client's Firebase Auth ID token
-        if (bearerToken) {
-          try {
-            const fbConfig = getServerFirebaseConfig();
-            const databaseId = !fbConfig.isExampleConfig ? fbConfig.firestoreDatabaseId : '(default)';
-            const projectId = !fbConfig.isExampleConfig ? fbConfig.projectId : '';
-            if (projectId) {
-              const restDocUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/apps/${encodeURIComponent(appId)}`;
-              const restRes = await fetch(restDocUrl, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${bearerToken}` }
-              });
-              if (restRes.ok) {
-                deletedFromFirestore = true;
-              }
-            }
-          } catch {}
-        }
-
-        // 2. Fallback: If cloud rules restrict direct hard delete, tombstone the app so it is removed from catalog & feeds
-        if (!deletedFromFirestore) {
+        // Fallback: If cloud rules or foreign keys restrict hard delete, tombstone the app
+        if (!deletedFromDb) {
           try {
             await serverSetDoc(appRef, {
               isDeleted: true,
@@ -2776,7 +2749,7 @@ async function startServer() {
               deletedBy: normUserEmail || userId,
               updatedAt: new Date().toISOString()
             }, { merge: true });
-            deletedFromFirestore = true;
+            deletedFromDb = true;
           } catch (tombstoneErr: any) {
             console.warn("[Backend] App deletion tombstone fallback notice:", tombstoneErr.message);
           }
@@ -4312,28 +4285,15 @@ async function startServer() {
     const bodyEmail = (req.body?.userEmail || req.query?.userEmail || req.headers['x-user-email'] || '').toString().trim().toLowerCase();
     const bodyUid = (req.body?.userId || req.query?.userId || req.headers['x-user-id'] || '').toString().trim();
 
-    // 1. If Bearer token is provided and Google API Key exists, verify against Google Identity API
+    // 1. If Bearer token is provided, verify against Supabase Auth
     if (bearerToken) {
       try {
-        const fbConfig = getServerFirebaseConfig();
-        if (fbConfig.apiKey && !fbConfig.isExampleConfig) {
-          const verifyRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${fbConfig.apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ idToken: bearerToken })
-          });
-          if (verifyRes.ok) {
-            const data = await verifyRes.json();
-            const verifiedUser = data.users?.[0];
-            if (verifiedUser) {
-              const verifiedEmail = (verifiedUser.email || '').toLowerCase().trim();
-              const verifiedUid = verifiedUser.localId;
-              if (isServerAdminEmail(verifiedEmail)) return true;
-              if (serverDb) {
-                const adminDoc = await serverGetDoc(serverDoc(serverDb, "admins", verifiedUid));
-                if (adminDoc.exists()) return true;
-              }
-            }
+        const verified = await verifySupabaseToken(bearerToken);
+        if (verified) {
+          if (isServerAdminEmail(verified.email) || verified.isAdmin) return true;
+          if (serverDb) {
+            const adminDoc = await serverGetDoc(serverDoc(serverDb, "admins", verified.uid));
+            if (adminDoc.exists()) return true;
           }
         }
       } catch (err: any) {
@@ -6196,13 +6156,9 @@ async function startServer() {
       if (isFetchingAllApps) return serverAppsCatalogCache;
       isFetchingAllApps = true;
       try {
-        const fbConfig = getServerFirebaseConfig();
-        const projectId = !fbConfig.isExampleConfig ? fbConfig.projectId : '';
-        const databaseId = !fbConfig.isExampleConfig ? fbConfig.firestoreDatabaseId : '(default)';
-
-        // Method 0: Check Supabase PostgreSQL apps table
+        // Method 1: Check Supabase PostgreSQL apps table
         try {
-          const supabaseApps = await fetchAppsFromSupabase(500);
+          const supabaseApps = await fetchAppsFromSupabase(1000);
           if (supabaseApps && supabaseApps.length > 0) {
             for (const app of supabaseApps) {
               indexAppIntoSeoCache(app);
@@ -6212,47 +6168,7 @@ async function startServer() {
             return serverAppsCatalogCache;
           }
         } catch (sbErr: any) {
-          // Gracefully continue to Firestore
-        }
-
-        // Method 1: Ultra-fast direct HTTP REST fetch (< 100ms, no gRPC handshake delays)
-        if (projectId) {
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
-            const restUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/apps?pageSize=500`;
-            const restRes = await fetch(restUrl, { signal: controller.signal }).catch(() => null);
-            clearTimeout(timeoutId);
-
-            if (restRes && restRes.ok) {
-              const data = await restRes.json().catch(() => null);
-              if (data && Array.isArray(data.documents)) {
-                const list: any[] = [];
-                for (const doc of data.documents) {
-                  const id = doc.name.split('/').pop();
-                  const fields = doc.fields || {};
-                  const parsed: any = { id };
-                  if (doc.createTime) parsed.createdAt = doc.createTime;
-                  if (doc.updateTime) parsed.updatedAt = doc.updateTime;
-                  for (const [key, val] of Object.entries<any>(fields)) {
-                    const fieldVal = parseFirestoreRestField(val);
-                    if (fieldVal !== undefined) parsed[key] = fieldVal;
-                  }
-                  if (!parsed.isDeleted && parsed.status !== 'deleted' && parsed.isPublished !== false) {
-                    list.push(parsed);
-                    indexAppIntoSeoCache(parsed);
-                  }
-                }
-                if (list.length > 0) {
-                  serverAppsCatalogCache = list;
-                  serverAppsCatalogCacheTime = Date.now();
-                  return serverAppsCatalogCache;
-                }
-              }
-            }
-          } catch (restErr: any) {
-            // Fall through to SDK query
-          }
+          console.warn("[Server] Supabase fetch notice:", sbErr.message);
         }
 
         // Method 2: Fallback to Server SDK query

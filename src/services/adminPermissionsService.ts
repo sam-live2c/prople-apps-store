@@ -93,7 +93,7 @@ export function initAdminPermissionsSync() {
   });
 
   try {
-    supabase.from('admins').select('*').then(({ data }) => {
+    Promise.resolve(supabase.from('admins').select('*')).then(({ data }: any) => {
       if (Array.isArray(data)) {
         data.forEach(item => {
           const email = (item.email || item.id || '').toLowerCase().trim();

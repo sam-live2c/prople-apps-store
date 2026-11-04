@@ -29,6 +29,7 @@ export interface DocumentReference {
 
 export interface DocumentSnapshot {
   id: string;
+  ref?: any;
   exists: () => boolean;
   data: () => Record<string, any> | undefined;
 }

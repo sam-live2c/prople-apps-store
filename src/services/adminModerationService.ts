@@ -1,5 +1,4 @@
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, onSnapshot, serverTimestamp } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, onSnapshot, serverTimestamp, db, auth } from '../firebase';
 import { AppDetails, Review } from '../types';
 
 export interface AppReportItem {
