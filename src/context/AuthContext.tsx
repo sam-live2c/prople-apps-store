@@ -53,8 +53,8 @@ interface AuthContextType {
   verifyPasswordStep: (email: string, pass: string) => Promise<void>;
   cancelPendingTwoFactor: () => Promise<void>;
   signup: (email: string, pass: string, name: string) => Promise<void>;
-  loginWithGoogle: () => Promise<void>;
-  loginWithGithub: (isSignUp?: boolean) => Promise<void>;
+  loginWithGoogle: () => Promise<UserProfile | null | void>;
+  loginWithGithub: (isSignUp?: boolean) => Promise<UserProfile | null | void>;
   sendEmailOtp: (email: string, name?: string) => Promise<{ success: boolean; delivered?: boolean; message?: string; challengeToken?: string }>;
   verifyEmailOtp: (email: string, code: string) => Promise<void>;
   forgotPassword: (email: string) => Promise<{ success: boolean; delivered?: boolean; message?: string; challengeToken?: string }>;
@@ -1202,8 +1202,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         timeoutPromise
       ]);
 
+      // If user is actively redirecting to OAuth provider, do not throw premature error
       if (!cred || !cred.user || !cred.user.email) {
-        throw new Error('Please select a legitimate Google account to sign in.');
+        setIsLoading(false);
+        return null;
       }
 
       const email = cred.user.email.toLowerCase().trim();
@@ -1438,8 +1440,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw popupErr;
       }
 
+      // If user is actively redirecting to OAuth provider, do not throw premature error
       if (!cred || !cred.user) {
-        throw new Error('Please select a legitimate GitHub account to sign in.');
+        setIsLoading(false);
+        return null;
       }
 
       resolvedUser = await processGithubCredential(cred);

@@ -752,9 +752,11 @@ export default function AuthPage({ onClose, onSuccess, initialMode = 'signin' }:
     setFieldErrors({});
     setIsSubmitting(true);
     try {
-      await loginWithGoogle();
-      showToast('Signed in with Google successfully.');
-      handleAuthSuccess();
+      const resUser = await loginWithGoogle();
+      if (resUser) {
+        showToast('Signed in with Google successfully.');
+        handleAuthSuccess();
+      }
     } catch (err: any) {
       const msg = sanitizeErrorMessage(err, 'Google sign-in was not completed. Please try again.');
       showToast(msg, { duration: 8000 });
@@ -769,9 +771,11 @@ export default function AuthPage({ onClose, onSuccess, initialMode = 'signin' }:
     setIsSubmitting(true);
     try {
       const isSigningUp = mode === 'signup';
-      await loginWithGithub(isSigningUp);
-      showToast(isSigningUp ? 'Signed up with GitHub successfully!' : 'Signed in with GitHub successfully!');
-      handleAuthSuccess();
+      const resUser = await loginWithGithub(isSigningUp);
+      if (resUser) {
+        showToast(isSigningUp ? 'Signed up with GitHub successfully!' : 'Signed in with GitHub successfully!');
+        handleAuthSuccess();
+      }
     } catch (err: any) {
       const msg = sanitizeErrorMessage(
         err,

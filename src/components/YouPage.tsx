@@ -184,10 +184,12 @@ export default function YouPage({ onAppClick, onOpenNotifications }: { onAppClic
   const handleGoogleSignIn = async () => {
     setIsSigningIn(true);
     try {
-      await loginWithGoogle();
-      showToast('Signed in with Google');
+      const resUser = await loginWithGoogle();
+      if (resUser) {
+        showToast('Signed in with Google');
+      }
     } catch {
-      showToast('Google sign-in failed. Please try again.');
+      showToast('Google sign-in could not be completed. Please try again.');
     } finally {
       setIsSigningIn(false);
     }

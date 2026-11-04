@@ -141,7 +141,7 @@ export async function signInWithPopup(authObj: any, provider: any): Promise<any>
     }
   });
   if (error) throw error;
-  return { user: auth.currentUser };
+  return { user: auth.currentUser, isRedirecting: true, url: data?.url };
 }
 
 export async function signInWithRedirect(authObj: any, provider: any): Promise<void> {

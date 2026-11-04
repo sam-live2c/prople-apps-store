@@ -47,12 +47,14 @@ export default function GoogleSignInDialog({
     setErrorMessage('');
     setIsSubmitting(true);
     try {
-      await loginWithGoogle();
-      showToast('Signed in with Google');
-      if (onSuccess) onSuccess();
-      onClose();
+      const resUser = await loginWithGoogle();
+      if (resUser) {
+        showToast('Signed in with Google');
+        if (onSuccess) onSuccess();
+        onClose();
+      }
     } catch (err: any) {
-      const msg = sanitizeErrorMessage(err, 'Google sign-in failed. Please try again with a legitimate Google account.');
+      const msg = sanitizeErrorMessage(err, 'Google sign-in could not be completed. Please try again.');
       setErrorMessage(msg);
       showToast(msg, { duration: 8000 });
     } finally {
