@@ -626,27 +626,6 @@ export default function YouPage({ onAppClick, onOpenNotifications }: { onAppClic
               </h2>
               {isUserVerifiedPublisher && <VerifiedBadge size="md" />}
             </div>
-
-            {/* Quick Actions: Edit Profile & Sign Out */}
-            <div className="flex items-center justify-center gap-2.5 mt-3.5">
-              <button
-                type="button"
-                onClick={() => setActiveView('edit-profile')}
-                className="px-4 py-2 bg-theme-hover hover:bg-theme-active text-theme-text text-xs font-medium rounded-full transition-colors cursor-pointer flex items-center gap-1.5"
-              >
-                <User className="w-3.5 h-3.5 text-theme-text-muted" />
-                <span>Edit profile</span>
-              </button>
-              <button
-                type="button"
-                id="you-card-signout-btn"
-                onClick={() => setShowLogoutConfirm(true)}
-                className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 hover:text-red-400 text-xs font-medium rounded-full transition-colors flex items-center gap-1.5 cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Sign out</span>
-              </button>
-            </div>
           </div>
         ) : (
           <div className="p-4 sm:p-5 bg-theme-card rounded-2xl shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { fetchAppsFromSupabase, fetchAppFromSupabase } from '../server/supabase.ts';
 
 const BASE_URL = 'https://www.prople.co.in';
 
@@ -403,55 +404,25 @@ async function fetchAllPublishedApps(): Promise<any[]> {
   }
 
   try {
-    const fbConfig = getServerFirebaseConfig();
-    if (fbConfig.isExampleConfig || !fbConfig.projectId) {
+    const apps = await fetchAppsFromSupabase(500);
+    if (apps && apps.length > 0) {
+      memoryAppsCache = apps.filter((a: any) => a && a.isPublished !== false);
+      lastCacheFetch = now;
       return memoryAppsCache;
     }
-
-    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${fbConfig.projectId}/databases/${fbConfig.firestoreDatabaseId}/documents/apps?pageSize=250`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
-
-    const res = await fetch(firestoreUrl, { signal: controller.signal }).catch(() => null);
-    clearTimeout(timeout);
-
-    if (res && res.ok) {
-      const data = await res.json().catch(() => null);
-      if (data && Array.isArray(data.documents)) {
-        const apps = data.documents.map(parseFirestoreDoc).filter(Boolean);
-        const publishedApps = apps.filter((a: any) => a && a.isPublished !== false);
-        if (publishedApps.length > 0) {
-          memoryAppsCache = publishedApps;
-          lastCacheFetch = now;
-          return publishedApps;
-        }
-      }
-    }
   } catch (err: any) {
-    console.warn('[Vercel SEO] Fast REST fetch notice:', err?.message || err);
+    console.warn('[Vercel SEO] Supabase fetch notice:', err?.message || err);
   }
 
   return memoryAppsCache;
 }
 
 async function fetchSingleAppDirect(appIdOrSlug: string): Promise<any | null> {
+  if (!appIdOrSlug) return null;
   try {
-    const fbConfig = getServerFirebaseConfig();
-    if (fbConfig.isExampleConfig || !fbConfig.projectId || !appIdOrSlug) return null;
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1800);
-
-    const docUrl = `https://firestore.googleapis.com/v1/projects/${fbConfig.projectId}/databases/${fbConfig.firestoreDatabaseId}/documents/apps/${encodeURIComponent(appIdOrSlug)}`;
-    const res = await fetch(docUrl, { signal: controller.signal }).catch(() => null);
-    clearTimeout(timeout);
-
-    if (res && res.ok) {
-      const docData = await res.json().catch(() => null);
-      const app = parseFirestoreDoc(docData);
-      if (app && app.isPublished !== false) {
-        return app;
-      }
+    const app = await fetchAppFromSupabase(appIdOrSlug);
+    if (app && app.isPublished !== false) {
+      return app;
     }
   } catch {}
   return null;

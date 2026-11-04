@@ -51,20 +51,20 @@ export default function UserAvatar({
 }: UserAvatarProps) {
   const [imgError, setImgError] = useState(false);
 
+  // If user has a profile picture (pfp), don't choose a background color for it
+  const hasPhoto = Boolean(photoURL && photoURL.trim() && !imgError);
   const identifier = email || displayName || publisherName || name || '';
   const initial = getAvatarInitial(displayName || publisherName || name, email);
-  const color = getGmailAvatarColor(identifier);
+  const color = (!photoURL && !hasPhoto) ? getGmailAvatarColor(identifier) : { bg: 'transparent', text: '#ffffff' };
 
   const containerSizeClass = SIZE_CONTAINER_CLASSES[size] || SIZE_CONTAINER_CLASSES.md;
   const textSizeClass = SIZE_TEXT_CLASSES[size] || SIZE_TEXT_CLASSES.md;
 
-  const hasPhoto = Boolean(photoURL && photoURL.trim() && !imgError);
-
   return (
     <div
-      className={`rounded-full flex items-center justify-center overflow-hidden shrink-0 select-none relative transition-colors ${containerSizeClass} ${className}`}
+      className={`rounded-full flex items-center justify-center overflow-hidden shrink-0 select-none relative ${containerSizeClass} ${className}`}
       style={{
-        backgroundColor: hasPhoto ? 'transparent' : color.bg,
+        backgroundColor: (hasPhoto || photoURL) ? 'transparent' : color.bg,
       }}
     >
       {hasPhoto ? (
@@ -72,14 +72,14 @@ export default function UserAvatar({
           src={photoURL!}
           alt={alt || displayName || name || 'Profile'}
           referrerPolicy="no-referrer"
-          className="w-full h-full object-cover"
+          className="w-full h-full object-cover bg-transparent"
           onError={() => setImgError(true)}
         />
       ) : (
         <span
           className={`font-google-sans font-medium text-white tracking-normal leading-none uppercase ${textSizeClass} ${textClassName}`}
           style={{
-            color: color.text,
+            color: (hasPhoto || photoURL) ? '#ffffff' : color.text,
             transform: 'translateY(0.5px)', // Optical vertical centering for sans-serif caps
           }}
         >

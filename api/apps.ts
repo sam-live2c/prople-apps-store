@@ -1,6 +1,7 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { 
+  fetchAppsFromSupabase, 
+  fetchAppFromSupabase 
+} from '../server/supabase.ts';
 
 const TRUSTED_ORIGIN_PATTERNS = [
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
@@ -39,49 +40,6 @@ function getSecureCorsHeaders(origin?: string): Record<string, string> {
   return headers;
 }
 
-function getServerFirebaseConfig() {
-  let fileConfig: any = {};
-  const candidates: string[] = [path.join(process.cwd(), 'firebase-applet-config.json')];
-  try {
-    const currentDir = path.dirname(fileURLToPath(import.meta.url));
-    candidates.push(path.join(currentDir, '..', 'firebase-applet-config.json'));
-  } catch {}
-
-  for (const configPath of candidates) {
-    try {
-      if (fs.existsSync(configPath)) {
-        fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        break;
-      }
-    } catch {}
-  }
-
-  const isReal = (val?: string) =>
-    Boolean(
-      val &&
-      typeof val === 'string' &&
-      val.trim().length > 0 &&
-      !val.includes('example') &&
-      !val.includes('Placeholder') &&
-      !val.includes('0000000000')
-    );
-
-  const apiKey = process.env.FIREBASE_API_KEY || (isReal(fileConfig.apiKey) ? fileConfig.apiKey : '');
-  const projectId = process.env.FIREBASE_PROJECT_ID || (isReal(fileConfig.projectId) ? fileConfig.projectId : '');
-  const firestoreDatabaseId =
-    process.env.FIRESTORE_DATABASE_ID ||
-    process.env.FIREBASE_DATABASE_ID ||
-    (isReal(fileConfig.firestoreDatabaseId) ? fileConfig.firestoreDatabaseId : '(default)');
-
-  const isExampleConfig = !isReal(apiKey) || !isReal(projectId);
-
-  return {
-    projectId: projectId || 'example-prople-store',
-    firestoreDatabaseId: firestoreDatabaseId || '(default)',
-    isExampleConfig,
-  };
-}
-
 export default async function handler(req: any, res: any) {
   const corsHeaders = getSecureCorsHeaders(req.headers?.origin);
   for (const [key, value] of Object.entries(corsHeaders)) {
@@ -96,77 +54,21 @@ export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
+
   try {
-    const fbConfig = getServerFirebaseConfig();
-    const databaseId = !fbConfig.isExampleConfig ? fbConfig.firestoreDatabaseId : '(default)';
-    const projectId = !fbConfig.isExampleConfig ? fbConfig.projectId : '';
-
-    if (projectId) {
-      const parseFirestoreField = (val: any): any => {
-        if (!val || typeof val !== 'object') return undefined;
-        if (val.stringValue !== undefined) return val.stringValue;
-        if (val.integerValue !== undefined) return parseInt(val.integerValue, 10);
-        if (val.doubleValue !== undefined) return parseFloat(val.doubleValue);
-        if (val.booleanValue !== undefined) return val.booleanValue;
-        if (val.timestampValue !== undefined) return val.timestampValue;
-        if (val.nullValue !== undefined) return null;
-        if (val.arrayValue !== undefined) {
-          return (val.arrayValue.values || []).map((v: any) => parseFirestoreField(v));
-        }
-        if (val.mapValue !== undefined) {
-          const obj: Record<string, any> = {};
-          for (const [k, v] of Object.entries<any>(val.mapValue.fields || {})) {
-            obj[k] = parseFirestoreField(v);
-          }
-          return obj;
-        }
-        return undefined;
-      };
-
-      const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/${databaseId}/documents/apps?pageSize=500`;
-      const firestoreRes = await fetch(firestoreUrl).catch(() => null);
-    if (firestoreRes && firestoreRes.ok) {
-      const data = await firestoreRes.json().catch(() => null);
-      if (data && Array.isArray(data.documents)) {
-        const apps = data.documents.map((doc: any) => {
-          const id = doc.name.split('/').pop();
-          const fields = doc.fields || {};
-          const parsed: any = { id };
-          if (doc.createTime) parsed.createdAt = doc.createTime;
-          if (doc.updateTime) parsed.updatedAt = doc.updateTime;
-          for (const [key, val] of Object.entries<any>(fields)) {
-            const fieldVal = parseFirestoreField(val);
-            if (fieldVal !== undefined) parsed[key] = fieldVal;
-          }
-          return parsed;
-        });
-        const requestedId = (req.query?.id || req.query?.appId || req.query?.slug || '').toString().trim().toLowerCase();
-        if (requestedId) {
-          const cleanSlug = requestedId.replace(/[^a-z0-9]/g, '');
-          const single = apps.find((app: any) => {
-            if (!app) return false;
-            if (app.id && app.id.toLowerCase() === requestedId) return true;
-            if (app.slug && app.slug.toLowerCase() === requestedId) return true;
-            if (app.packageName && app.packageName.toLowerCase() === requestedId) return true;
-            if (app.name && app.name.toLowerCase() === requestedId) return true;
-            const nameSlug = (app.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-            const idSlug = (app.id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-            return Boolean((nameSlug && nameSlug === cleanSlug) || (idSlug && idSlug === cleanSlug));
-          });
-          if (single) {
-            return res.status(200).json({ success: true, app: single });
-          }
-          return res.status(404).json({ success: false, error: 'Application not found' });
-        }
-
-        return res.status(200).json({ success: true, apps });
+    const requestedId = (req.query?.id || req.query?.appId || req.query?.slug || '').toString().trim();
+    if (requestedId) {
+      const single = await fetchAppFromSupabase(requestedId);
+      if (single) {
+        return res.status(200).json({ success: true, app: single });
       }
-    }
+      return res.status(404).json({ success: false, error: 'Application not found' });
     }
 
-    return res.status(200).json({ success: true, apps: [] });
+    const apps = await fetchAppsFromSupabase(1000);
+    return res.status(200).json({ success: true, count: apps.length, apps });
   } catch (err: any) {
     console.warn('[apps API Notice]', err?.message || err);
-    return res.status(200).json({ success: true, apps: [] });
+    return res.status(500).json({ success: false, error: err.message, apps: [] });
   }
 }
