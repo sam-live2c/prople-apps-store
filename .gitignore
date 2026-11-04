@@ -20,3 +20,14 @@ firebase_applet_config.xml
 .env
 .env.local
 .env.production
+.env.*.local
+client_secret*.json
+serviceAccountKey*.json
+*.pem
+*.key
+*.crt
+*.p8
+*.p12
+*.keystore
+*.jks
+.vercel/
