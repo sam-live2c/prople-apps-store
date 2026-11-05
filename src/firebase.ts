@@ -289,12 +289,18 @@ function mapSupabaseRowToClientApp(row: any): any {
 }
 
 function mapClientAppToSupabaseRow(app: any): any {
-  if (!app) return {};
+  if (!app || !app.id) return {};
+  const appIdStr = String(app.id);
+  if (appIdStr.startsWith('rev-') || appIdStr.startsWith('notif-')) return {};
+  const safeName = (app.name || '').trim();
+  if (!safeName || safeName === 'Untitled App' || safeName === 'Untitled') {
+    return {};
+  }
   return {
-    id: String(app.id),
+    id: appIdStr,
     slug: app.slug || null,
-    name: String(app.name || 'Untitled App'),
-    developer: String(app.developer || 'Unknown Developer'),
+    name: safeName,
+    developer: String(app.developer || 'Developer'),
     category: app.category || 'Utilities',
     rating: typeof app.rating === 'number' ? app.rating : 5.0,
     reviews_count: String(app.reviewsCount || '1'),
@@ -427,11 +433,30 @@ export async function getDocs(colOrQuery: any): Promise<any> {
     try {
       const { data } = await supabase.from('apps').select('*').limit(1000);
       if (Array.isArray(data) && data.length > 0) {
-        docs = data.map(row => {
-          const app = mapSupabaseRowToClientApp(row);
-          inMemoryClientStore.set(`apps/${app.id}`, app);
-          return { id: app.id, exists: () => true, data: () => app };
-        });
+        const adminDeletedRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('prople_admin_deleted_apps') : null;
+        const deletedSet = new Set<string>(['rev-1793850952322']);
+        if (adminDeletedRaw) {
+          try {
+            const arr = JSON.parse(adminDeletedRaw);
+            if (Array.isArray(arr)) arr.forEach((x: any) => deletedSet.add(String(x)));
+          } catch {}
+        }
+
+        docs = data
+          .map(row => mapSupabaseRowToClientApp(row))
+          .filter(app => {
+            if (!app || !app.id) return false;
+            if (deletedSet.has(app.id)) return false;
+            if (app.id.startsWith('rev-') || app.id.startsWith('notif-')) return false;
+            if (app.isDeleted || app.status === 'deleted' || app.isPublished === false) return false;
+            const name = (app.name || '').trim();
+            if (!name || name === 'Untitled App' || name === 'Untitled') return false;
+            return true;
+          })
+          .map(app => {
+            inMemoryClientStore.set(`apps/${app.id}`, app);
+            return { id: app.id, exists: () => true, data: () => app };
+          });
       }
     } catch {}
   } else if (col === 'apps' && subcol === 'reviews' && parentId) {
@@ -479,9 +504,16 @@ export async function setDoc(docRef: any, data: any, options?: { merge?: boolean
   const col = segments[0];
   const id = segments[1];
 
-  if (col === 'apps' && id) {
+  if (col === 'apps' && id && segments.length === 2 && !docRef.subcollection) {
+    if (!id.startsWith('rev-') && !id.startsWith('notif-') && merged.name && merged.name !== 'Untitled App' && merged.name !== 'Untitled') {
+      try {
+        await supabase.from('apps').upsert(mapClientAppToSupabaseRow({ id, ...merged }));
+      } catch {}
+    }
+  } else if (col === 'apps' && docRef.subcollection === 'reviews' && segments.length === 4) {
+    const reviewId = segments[3];
     try {
-      await supabase.from('apps').upsert(mapClientAppToSupabaseRow({ id, ...merged }));
+      await supabase.from('reviews').upsert({ id: reviewId, app_id: id, ...merged });
     } catch {}
   } else if (col === 'users' && id) {
     try {
@@ -506,6 +538,18 @@ export async function deleteDoc(docRef: any): Promise<void> {
 
   if (col === 'apps' && id) {
     try {
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem('prople_admin_deleted_apps');
+        const s = new Set<string>(['rev-1793850952322']);
+        if (raw) {
+          try {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) arr.forEach((x: any) => s.add(String(x)));
+          } catch {}
+        }
+        s.add(id);
+        localStorage.setItem('prople_admin_deleted_apps', JSON.stringify(Array.from(s)));
+      }
       await supabase.from('apps').delete().eq('id', id);
     } catch {}
   } else if (col === 'reviews' && id) {

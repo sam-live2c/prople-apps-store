@@ -1,6 +1,8 @@
 import { 
   fetchAppFromSupabase, 
-  deleteAppFromSupabase 
+  deleteAppFromSupabase,
+  markAppDeletedServer,
+  isAppDeletedServer
 } from '../../server/supabase.ts';
 import { authenticateApiRequest } from '../../server/tokenVerifier.ts';
 
@@ -67,14 +69,23 @@ export default async function handler(req: any, res: any) {
   try {
     // Handle DELETE method
     if (req.method === 'DELETE') {
-      const existingData = await fetchAppFromSupabase(appId);
-      if (!existingData) {
-        return res.status(404).json({ success: false, error: 'Application not found' });
-      }
-
       const callerAuth = await authenticateApiRequest(req);
       const callerUid = callerAuth.uid;
       const callerEmail = (callerAuth.email || '').toLowerCase().trim();
+
+      if (callerAuth.isVerifiedAdmin) {
+        markAppDeletedServer(appId);
+        await deleteAppFromSupabase(appId);
+        return res.status(200).json({ success: true, deletedAppId: appId });
+      }
+
+      const existingData = await fetchAppFromSupabase(appId);
+      if (!existingData) {
+        if (isAppDeletedServer(appId)) {
+          return res.status(200).json({ success: true, deletedAppId: appId });
+        }
+        return res.status(404).json({ success: false, error: 'Application not found' });
+      }
 
       const devEmail = (existingData.developerEmail || '').toLowerCase().trim();
       const pubEmail = (existingData.publisherEmail || '').toLowerCase().trim();
@@ -89,7 +100,6 @@ export default async function handler(req: any, res: any) {
       );
 
       const isOwner =
-        callerAuth.isVerifiedAdmin ||
         (callerUid &&
           callerUid !== 'guest' &&
           callerUid !== 'developer' &&
@@ -104,8 +114,9 @@ export default async function handler(req: any, res: any) {
         return res.status(403).json({ success: false, error: 'Forbidden: You do not own this application and cannot delete it.' });
       }
 
+      markAppDeletedServer(appId);
       const deleted = await deleteAppFromSupabase(appId);
-      return res.status(200).json({ success: deleted, deletedAppId: appId });
+      return res.status(200).json({ success: deleted?.success ?? true, deletedAppId: appId });
     }
 
     // GET: Query single app by ID, slug, or name

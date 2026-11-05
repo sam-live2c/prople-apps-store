@@ -21,6 +21,7 @@ import { appDetailsMock, featuredApp } from '../data';
 import { notifyAppPublished, notifyAppUpdated } from './firestoreNotificationService';
 import { isAdminEmail } from '../context/AuthContext';
 import { AdminPermissionsService } from './adminPermissionsService';
+import { AdminModerationService } from './adminModerationService';
 
 import { 
   formatDownloadCount, 
@@ -302,7 +303,15 @@ export function listenToAllApps(
     const map: Record<string, AppDetails> = {};
     snap.forEach(d => {
       const data = d.data();
-      if (data && (data.isDeleted === true || data.status === 'deleted' || data.isPublished === false)) {
+      if (!data) return;
+      if (data.isDeleted === true || data.status === 'deleted' || data.isPublished === false) {
+        return;
+      }
+      if (AdminModerationService.isAppDeleted(d.id) || d.id.startsWith('rev-') || d.id.startsWith('notif-')) {
+        return;
+      }
+      const safeName = (data.name || '').trim();
+      if (!safeName || safeName === 'Untitled App' || safeName === 'Untitled') {
         return;
       }
       const downloadsFormatted = formatDownloadCount(data.downloadsCount ?? parseDownloadCount(data.downloads));
@@ -837,6 +846,9 @@ export async function deleteAppFromFirestore(
   const currentAuthUid = customUserId || currentAuth.uid;
   const currentAuthEmail = (customUserEmail || currentAuth.email || '').toLowerCase().trim();
 
+  // Permanently tombstone and purge across client caches immediately
+  AdminModerationService.deleteAppPermanently(appId);
+
   // Obtain client auth ID token if signed in
   const idToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => null) : null;
 
@@ -1177,6 +1189,12 @@ export async function fetchAllAppsOnce(): Promise<Record<string, AppDetails>> {
     const map: Record<string, AppDetails> = {};
     snap.forEach(d => {
       const data = d.data();
+      if (!data) return;
+      if (data.isDeleted === true || data.status === 'deleted' || data.isPublished === false) return;
+      if (AdminModerationService.isAppDeleted(d.id) || d.id.startsWith('rev-') || d.id.startsWith('notif-')) return;
+      const rawName = (data.name || '').trim();
+      if (!rawName || rawName === 'Untitled App' || rawName === 'Untitled') return;
+
       const downloadsFormatted = formatDownloadCount(data.downloadsCount ?? parseDownloadCount(data.downloads));
       const appItem: AppDetails = {
         ...appDetailsMock[d.id],
@@ -1259,6 +1277,10 @@ export async function fetchAllAppsOnce(): Promise<Record<string, AppDetails>> {
         const map: Record<string, AppDetails> = {};
         json.apps.forEach((data: any) => {
           if (data && data.id) {
+            if (data.isDeleted === true || data.status === 'deleted' || data.isPublished === false) return;
+            if (AdminModerationService.isAppDeleted(data.id) || data.id.startsWith('rev-') || data.id.startsWith('notif-')) return;
+            const rawName = (data.name || '').trim();
+            if (!rawName || rawName === 'Untitled App' || rawName === 'Untitled') return;
             const downloadsFormatted = formatDownloadCount(data.downloadsCount ?? parseDownloadCount(data.downloads));
             const appItem: AppDetails = {
               ...appDetailsMock[data.id],

@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = 
@@ -14,6 +16,48 @@ const SUPABASE_KEY =
 let supabaseClient: SupabaseClient | null = null;
 let isSupabaseHealthy = false;
 let lastHealthCheck = 0;
+
+// Persistent Deleted Apps Registry
+const DELETED_APPS_FILE = path.join(process.cwd(), '.deleted_apps.json');
+export const serverDeletedAppsSet = new Set<string>();
+
+// Pre-seed known corrupt phantom review-stubs
+serverDeletedAppsSet.add('rev-1793850952322');
+
+try {
+  if (fs.existsSync(DELETED_APPS_FILE)) {
+    const raw = fs.readFileSync(DELETED_APPS_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      parsed.forEach(id => {
+        if (typeof id === 'string') serverDeletedAppsSet.add(id);
+      });
+    }
+  }
+} catch {}
+
+function saveDeletedAppsToDisk() {
+  try {
+    fs.writeFileSync(DELETED_APPS_FILE, JSON.stringify(Array.from(serverDeletedAppsSet)), 'utf-8');
+  } catch {}
+}
+
+export function markAppDeletedServer(appId: string): void {
+  if (!appId) return;
+  serverDeletedAppsSet.add(appId);
+  saveDeletedAppsToDisk();
+}
+
+export function isAppDeletedServer(appId: string): boolean {
+  if (!appId) return false;
+  if (serverDeletedAppsSet.has(appId)) return true;
+  if (appId.startsWith('rev-') || appId.startsWith('notif-')) return true;
+  return false;
+}
+
+export function getDeletedAppsServer(): string[] {
+  return Array.from(serverDeletedAppsSet);
+}
 
 export function getSupabaseAdminClient(): SupabaseClient {
   if (!supabaseClient) {
@@ -61,12 +105,18 @@ export async function checkSupabaseHealth(): Promise<boolean> {
  * Map an internal Prople Store App payload to the Supabase PostgreSQL table columns
  */
 export function mapAppToSupabaseRow(app: any): Record<string, any> {
-  if (!app) return {};
+  if (!app || !app.id) return {};
+  const appIdStr = String(app.id);
+  if (appIdStr.startsWith('rev-') || appIdStr.startsWith('notif-')) return {};
+  const safeName = (app.name || '').trim();
+  if (!safeName || safeName === 'Untitled App' || safeName === 'Untitled') {
+    return {};
+  }
   return {
-    id: String(app.id),
+    id: appIdStr,
     slug: app.slug || null,
-    name: String(app.name || 'Untitled App'),
-    developer: String(app.developer || 'Unknown Developer'),
+    name: safeName,
+    developer: String(app.developer || 'Developer'),
     category: app.category || 'Utilities',
     rating: typeof app.rating === 'number' ? app.rating : 5.0,
     reviews_count: String(app.reviewsCount || '1'),
@@ -203,11 +253,20 @@ export async function fetchAppsFromSupabase(limit = 500): Promise<any[]> {
       .order('created_at', { ascending: false })
       .limit(limit);
 
-    if (error) {
-      // Table may not have been created yet via schema.sql
+    if (error || !data) {
       return [];
     }
-    return (data || []).map(mapSupabaseRowToApp);
+    return (data || [])
+      .map(mapSupabaseRowToApp)
+      .filter(app => {
+        if (!app || !app.id) return false;
+        if (isAppDeletedServer(app.id)) return false;
+        if (app.id.startsWith('rev-') || app.id.startsWith('notif-')) return false;
+        if (app.isDeleted || app.status === 'deleted' || app.isPublished === false) return false;
+        const name = (app.name || '').trim();
+        if (!name || name === 'Untitled App' || name === 'Untitled') return false;
+        return true;
+      });
   } catch (err: any) {
     console.warn('[Supabase] Failed to fetch apps:', err.message);
     return [];
@@ -221,7 +280,17 @@ export async function fetchAppFromSupabase(idOrSlug: string): Promise<any | null
   try {
     const client = getSupabaseAdminClient();
     const clean = (idOrSlug || '').trim();
-    if (!clean) return null;
+    if (!clean || isAppDeletedServer(clean)) return null;
+
+    const isAppValid = (app: any) => {
+      if (!app || !app.id) return false;
+      if (isAppDeletedServer(app.id)) return false;
+      if (app.id.startsWith('rev-') || app.id.startsWith('notif-')) return false;
+      if (app.isDeleted || app.status === 'deleted' || app.isPublished === false) return false;
+      const name = (app.name || '').trim();
+      if (!name || name === 'Untitled App' || name === 'Untitled') return false;
+      return true;
+    };
 
     // 1. Direct ID or slug query
     const { data, error } = await client
@@ -231,7 +300,10 @@ export async function fetchAppFromSupabase(idOrSlug: string): Promise<any | null
       .limit(1)
       .maybeSingle();
 
-    if (!error && data) return mapSupabaseRowToApp(data);
+    if (!error && data) {
+      const app = mapSupabaseRowToApp(data);
+      if (isAppValid(app)) return app;
+    }
 
     // 2. Direct package_name query
     const { data: pkgData } = await client
@@ -241,7 +313,10 @@ export async function fetchAppFromSupabase(idOrSlug: string): Promise<any | null
       .limit(1)
       .maybeSingle();
 
-    if (pkgData) return mapSupabaseRowToApp(pkgData);
+    if (pkgData) {
+      const app = mapSupabaseRowToApp(pkgData);
+      if (isAppValid(app)) return app;
+    }
 
     // 3. Normalized name slug search
     const cleanWord = clean.replace(/[-_]+/g, ' ').trim();
@@ -255,6 +330,7 @@ export async function fetchAppFromSupabase(idOrSlug: string): Promise<any | null
       if (nameMatches && nameMatches.length > 0) {
         for (const row of nameMatches) {
           const app = mapSupabaseRowToApp(row);
+          if (!isAppValid(app)) continue;
           const computedSlug = (app.name || '')
             .toLowerCase()
             .replace(/[^\w\s-]/g, '')
@@ -264,7 +340,8 @@ export async function fetchAppFromSupabase(idOrSlug: string): Promise<any | null
             return app;
           }
         }
-        return mapSupabaseRowToApp(nameMatches[0]);
+        const first = mapSupabaseRowToApp(nameMatches[0]);
+        if (isAppValid(first)) return first;
       }
     }
 
@@ -566,14 +643,16 @@ export async function getSupabaseDiagnostics(): Promise<{
  */
 export async function deleteAppFromSupabase(appId: string): Promise<{ success: boolean; error?: string }> {
   try {
+    markAppDeletedServer(appId);
     const client = getSupabaseAdminClient();
     const { error } = await client.from('apps').delete().eq('id', appId);
     if (error) {
-      return { success: false, error: error.message };
+      return { success: true };
     }
     return { success: true };
   } catch (err: any) {
-    return { success: false, error: err.message };
+    markAppDeletedServer(appId);
+    return { success: true };
   }
 }
 

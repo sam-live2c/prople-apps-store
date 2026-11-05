@@ -223,6 +223,7 @@ const LOCAL_STORAGE_PUBLISHER_RESTRICTIONS = 'prople_admin_publisher_restriction
 const LOCAL_STORAGE_BANNED_RELEASES = 'prople_admin_banned_releases_v1';
 const LOCAL_STORAGE_APP_MODERATION = 'prople_admin_app_moderation_v1';
 const LOCAL_STORAGE_VERIFIED_ACCOUNTS = 'prople_admin_verified_accounts_v1';
+const LOCAL_STORAGE_DELETED_APPS = 'prople_admin_deleted_apps';
 
 // In-memory cache
 let appReportsCache: Record<string, AppReportItem> = {};
@@ -232,6 +233,7 @@ let bannedReleasesCache: BannedReleaseLink[] = [];
 let appModerationCache: Record<string, AppModerationState> = {};
 let verifiedAccountsByEmail: Record<string, VerifiedAccountRecord> = {};
 let verifiedAccountsByUid: Record<string, VerifiedAccountRecord> = {};
+const deletedAppsCache: Set<string> = new Set<string>(['rev-1793850952322']);
 
 export function dispatchModerationEvent() {
   if (typeof window !== 'undefined') {
@@ -413,6 +415,17 @@ function initLocalCache() {
       if (parsed?.byUid) verifiedAccountsByUid = parsed.byUid;
     }
   } catch {}
+  try {
+    const rawDel = localStorage.getItem(LOCAL_STORAGE_DELETED_APPS);
+    if (rawDel) {
+      const parsed = JSON.parse(rawDel);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((x: any) => {
+          if (typeof x === 'string' && x) deletedAppsCache.add(x);
+        });
+      }
+    }
+  } catch {}
 }
 
 initLocalCache();
@@ -494,8 +507,76 @@ async function getAdminAuthHeaders(): Promise<Record<string, string>> {
 }
 
 export const AdminModerationService = {
+  isAppDeleted(appId: string): boolean {
+    if (!appId) return false;
+    initLocalCache();
+    if (deletedAppsCache.has(appId)) return true;
+    if (appId.startsWith('rev-') || appId.startsWith('notif-')) return true;
+    return false;
+  },
+
+  getDeletedApps(): string[] {
+    initLocalCache();
+    return Array.from(deletedAppsCache);
+  },
+
+  deleteAppPermanently(appId: string) {
+    if (!appId) return;
+    initLocalCache();
+    deletedAppsCache.add(appId);
+    try {
+      localStorage.setItem(LOCAL_STORAGE_DELETED_APPS, JSON.stringify(Array.from(deletedAppsCache)));
+    } catch {}
+
+    // Clean from active catalog cache in localStorage if present
+    try {
+      const activeRaw = localStorage.getItem('prople_active_store_catalog_v1');
+      if (activeRaw) {
+        const parsed = JSON.parse(activeRaw);
+        if (parsed && typeof parsed === 'object' && parsed[appId]) {
+          delete parsed[appId];
+          localStorage.setItem('prople_active_store_catalog_v1', JSON.stringify(parsed));
+        }
+      }
+    } catch {}
+
+    dispatchModerationEvent();
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('prople:catalog:updated'));
+      } catch {}
+    }
+
+    // Inform backend of permanent tombstone
+    fetch('/api/admin/deleted-apps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appId })
+    }).catch(() => {});
+  },
+
+  async syncDeletedAppsFromServer(): Promise<void> {
+    try {
+      const res = await fetch('/api/admin/deleted-apps');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.deletedAppIds)) {
+          initLocalCache();
+          data.deletedAppIds.forEach((id: string) => {
+            if (id) deletedAppsCache.add(id);
+          });
+          try {
+            localStorage.setItem(LOCAL_STORAGE_DELETED_APPS, JSON.stringify(Array.from(deletedAppsCache)));
+          } catch {}
+          dispatchModerationEvent();
+        }
+      }
+    } catch {}
+  },
+
   // Sync admin reports from server-authoritative endpoint
   async syncAdminReportsFromServer(): Promise<void> {
+    this.syncDeletedAppsFromServer().catch(() => {});
     const email = getCurrentAdminEmail();
     if (!email) return;
     try {

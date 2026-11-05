@@ -98,7 +98,11 @@ import {
   insertReviewToSupabase,
   migrateFirestoreAppsToSupabase,
   getSupabaseDiagnostics,
-  upsertProfileToSupabase
+  upsertProfileToSupabase,
+  markAppDeletedServer,
+  isAppDeletedServer,
+  getDeletedAppsServer,
+  deleteAppFromSupabase
 } from "./server/supabase.ts";
 
 // Server-side database initialization using Supabase PostgreSQL store
@@ -2694,14 +2698,25 @@ async function startServer() {
         });
       }
 
+      const normUserEmail = (userEmail || '').toLowerCase().trim();
+      const hasDeletePermission = await hasAdminPermission(serverDb, 'DELETE_APP', normUserEmail, userId);
+
       const appRef = serverDoc(serverDb, "apps", appId);
       const snap = await serverGetDoc(appRef);
       if (!snap.exists()) {
+        if (hasDeletePermission || isAuthorizedAdmin(normUserEmail)) {
+          markAppDeletedServer(appId);
+          deleteAppFromSupabase(appId).catch(() => {});
+          serverAppsCatalogCache = serverAppsCatalogCache.filter(a => a.id !== appId);
+          seoAppsCache.delete(appId.toLowerCase());
+          seoAppsCache.delete(appId);
+          deleteAppFromIndex(appId).catch(() => {});
+          return res.json({ success: true, deletedAppId: appId });
+        }
         return res.status(404).json({ success: false, error: "Application not found" });
       }
 
       const existingData = snap.data();
-      const normUserEmail = (userEmail || '').toLowerCase().trim();
       const devEmail = (existingData.developerEmail || '').toLowerCase().trim();
       const pubEmail = (existingData.publisherEmail || '').toLowerCase().trim();
       const ownerEmail = (existingData.ownerEmail || '').toLowerCase().trim();
@@ -2726,14 +2741,16 @@ async function startServer() {
         )) ||
         isMatchingEmail;
 
-      const hasDeletePermission = await hasAdminPermission(serverDb, 'DELETE_APP', normUserEmail, userId);
-
       if (!isOwner && !hasDeletePermission) {
         return res.status(403).json({
           success: false,
           error: "Forbidden: You do not own this application and are not an authorized administrator."
         });
       }
+
+      // Mark deleted in persistent server registry immediately
+      markAppDeletedServer(appId);
+      deleteAppFromSupabase(appId).catch(() => {});
 
       let deletedFromDb = false;
       try {
@@ -2785,6 +2802,32 @@ async function startServer() {
       console.error("[Backend] Error deleting app:", err.message);
       return res.status(500).json({ success: false, error: err.message });
     }
+  });
+
+  // Dedicated endpoints for persistent admin deleted apps synchronization
+  app.get("/api/admin/deleted-apps", (_req, res) => {
+    return res.json({ success: true, deletedAppIds: getDeletedAppsServer() });
+  });
+
+  app.post("/api/admin/deleted-apps", async (req, res) => {
+    const rawAppId = (req.body?.appId || req.query?.appId || '').toString().trim();
+    if (!rawAppId) {
+      return res.status(400).json({ success: false, error: "App ID is required" });
+    }
+    markAppDeletedServer(rawAppId);
+    try {
+      await deleteAppFromSupabase(rawAppId);
+    } catch {}
+    if (serverDb) {
+      try {
+        await serverDeleteDoc(serverDoc(serverDb, "apps", rawAppId));
+      } catch {}
+    }
+    serverAppsCatalogCache = serverAppsCatalogCache.filter(a => a.id !== rawAppId);
+    seoAppsCache.delete(rawAppId.toLowerCase());
+    seoAppsCache.delete(rawAppId);
+    deleteAppFromIndex(rawAppId).catch(() => {});
+    return res.json({ success: true, deletedAppId: rawAppId, allDeletedAppIds: getDeletedAppsServer() });
   });
 
   // Dedicated endpoint: Migrate and claim app ownership across authentication methods
@@ -3325,16 +3368,18 @@ async function startServer() {
         const snap = await serverGetDoc(appRef).catch(() => null);
         if (snap && snap.exists()) {
           await serverSetDoc(appRef, updatePayload, { merge: true });
-        } else {
+        } else if (!isAppDeletedServer(appId) && !appId.startsWith('rev-') && !appId.startsWith('notif-')) {
           const allApps = await getAllAppsServer(500).catch(() => []);
           const defaultApp = allApps.find((a: any) => a.id === appId);
-          updatePayload.id = appId;
-          updatePayload.name = defaultApp?.name || appId;
-          updatePayload.developer = defaultApp?.developer || 'Developer';
-          updatePayload.category = defaultApp?.category || 'Utilities';
-          updatePayload.createdAt = nowIso;
-          updatePayload.isPublished = true;
-          await serverSetDoc(appRef, updatePayload, { merge: true });
+          if (defaultApp && defaultApp.name && defaultApp.name !== 'Untitled App' && defaultApp.name !== 'Untitled') {
+            updatePayload.id = appId;
+            updatePayload.name = defaultApp.name;
+            updatePayload.developer = defaultApp.developer || 'Developer';
+            updatePayload.category = defaultApp.category || 'Utilities';
+            updatePayload.createdAt = nowIso;
+            updatePayload.isPublished = true;
+            await serverSetDoc(appRef, updatePayload, { merge: true });
+          }
         }
       } catch (e: any) {
         console.warn("[Backend Reviews] Firestore app aggregate write notice:", e.message);
@@ -6187,6 +6232,9 @@ async function startServer() {
           snap.forEach(d => {
             const data = d.data();
             if (data && !data.isDeleted && data.status !== 'deleted' && data.isPublished !== false) {
+              if (isAppDeletedServer(d.id) || d.id.startsWith('rev-') || d.id.startsWith('notif-')) return;
+              const name = (data.name || '').trim();
+              if (!name || name === 'Untitled App' || name === 'Untitled') return;
               const fullApp = { id: d.id, ...data };
               list.push(fullApp);
               indexAppIntoSeoCache(fullApp);
@@ -6197,10 +6245,10 @@ async function startServer() {
             serverAppsCatalogCacheTime = Date.now();
           }
         }
-        return serverAppsCatalogCache;
+        return serverAppsCatalogCache.filter(a => a && a.id && !isAppDeletedServer(a.id) && !a.id.startsWith('rev-') && a.name && a.name !== 'Untitled App' && a.name !== 'Untitled');
       } catch (e: any) {
         console.warn("[Server] Notice getting all apps:", e.message);
-        return serverAppsCatalogCache;
+        return serverAppsCatalogCache.filter(a => a && a.id && !isAppDeletedServer(a.id) && !a.id.startsWith('rev-') && a.name && a.name !== 'Untitled App' && a.name !== 'Untitled');
       } finally {
         activeFetchPromise = null;
       }

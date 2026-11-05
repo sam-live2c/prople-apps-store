@@ -16,7 +16,9 @@ import {
   fetchNotificationsFromSupabase,
   checkSupabaseHealth,
   mapAppToSupabaseRow,
-  mapSupabaseRowToApp
+  mapSupabaseRowToApp,
+  markAppDeletedServer,
+  isAppDeletedServer
 } from './supabase.ts';
 
 export interface DocumentReference {
@@ -266,7 +268,8 @@ export async function serverDeleteDoc(docRef: DocumentReference): Promise<void> 
   inMemoryStore.delete(docRef.path);
 
   if (docRef.collection === 'apps' && !docRef.subcollection) {
-    deleteAppFromSupabase(docRef.id).catch(() => {});
+    markAppDeletedServer(docRef.id);
+    await deleteAppFromSupabase(docRef.id).catch(() => {});
   } else if (docRef.collection === 'notifications') {
     deleteNotificationFromSupabase(docRef.id).catch(() => {});
   } else if (docRef.collection === 'banned_releases') {
@@ -293,11 +296,20 @@ export async function serverGetDocs(colOrQuery: any): Promise<QuerySnapshot> {
     try {
       const apps = await fetchAppsFromSupabase(1000);
       if (apps.length > 0) {
-        docs = apps.map(app => ({
-          id: app.id,
-          exists: () => true,
-          data: () => app
-        }));
+        docs = apps
+          .filter(app => {
+            if (!app || !app.id) return false;
+            if (isAppDeletedServer(app.id)) return false;
+            if (app.id.startsWith('rev-') || app.id.startsWith('notif-')) return false;
+            const name = (app.name || '').trim();
+            if (!name || name === 'Untitled App' || name === 'Untitled') return false;
+            return true;
+          })
+          .map(app => ({
+            id: app.id,
+            exists: () => true,
+            data: () => app
+          }));
       }
     } catch {}
   } else if (col === 'apps' && subcol === 'reviews' && parentId) {
@@ -345,6 +357,16 @@ export async function serverGetDocs(colOrQuery: any): Promise<QuerySnapshot> {
     if (key.startsWith(prefix)) {
       const remainder = key.substring(prefix.length);
       if (!remainder.includes('/')) {
+        if (col === 'apps' && !subcol) {
+          if (isAppDeletedServer(remainder) || remainder.startsWith('rev-') || remainder.startsWith('notif-')) {
+            continue;
+          }
+          const appVal = value as any;
+          const name = (appVal?.name || '').trim();
+          if (!name || name === 'Untitled App' || name === 'Untitled') {
+            continue;
+          }
+        }
         memoryDocs.push({
           id: remainder,
           exists: () => true,

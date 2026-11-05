@@ -1118,8 +1118,16 @@ export default function AdminControlPanel({
         map.set(a.id, (apps[a.id] || a) as AppDetails);
       }
     });
-    return Array.from(map.values());
-  }, [appsList, rawAllAppListings, allAppListings, apps]);
+    return Array.from(map.values()).filter(a => {
+      if (!a || !a.id) return false;
+      if (AdminModerationService.isAppDeleted(a.id)) return false;
+      if (a.id.startsWith('rev-') || a.id.startsWith('notif-')) return false;
+      if ((a as any).isDeleted || (a as any).status === 'deleted' || (a as any).isPublished === false) return false;
+      const name = (a.name || '').trim();
+      if (!name || name === 'Untitled App' || name === 'Untitled') return false;
+      return true;
+    });
+  }, [appsList, rawAllAppListings, allAppListings, apps, moderationStates]);
 
   // Filtered lists for each tab
   const filteredAppReports = useMemo(() => {
@@ -1216,8 +1224,8 @@ export default function AdminControlPanel({
     }>();
 
     fullAppsList.forEach(app => {
-      const pubName = (app.publisherName || app.developer || 'Unknown Publisher').trim();
-      if (!pubName) return;
+      const pubName = (app.publisherName || app.developer || '').trim();
+      if (!pubName || pubName === 'Unknown Developer' || pubName === 'Unknown Publisher') return;
       const key = pubName.toLowerCase();
       const restriction = publisherRestrictions[key];
       const isRestricted = Boolean(restriction?.isRestricted);
@@ -1642,6 +1650,7 @@ export default function AdminControlPanel({
         // Process deletion in background and report status via toast
         (async () => {
           try {
+            AdminModerationService.deleteAppPermanently(app.id);
             await removeApp(app.id, user?.uid, user?.email);
             AdminModerationService.deleteAppReport(app.id);
             refreshData();

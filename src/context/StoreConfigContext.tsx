@@ -318,7 +318,15 @@ export function StoreConfigProvider({ children }: { children: ReactNode }) {
 
     const syncAppsAndBanners = (liveApps: Record<string, AppDetails> | null) => {
       if (!isMounted) return;
-      const freshApps = overlayCurrentSavedUserPublisherName(liveApps || {});
+      const rawFresh = overlayCurrentSavedUserPublisherName(liveApps || {});
+      const freshApps: Record<string, AppDetails> = {};
+      for (const [k, v] of Object.entries(rawFresh)) {
+        if (!v || !v.id) continue;
+        if (AdminModerationService.isAppDeleted(v.id) || v.id.startsWith('rev-') || v.id.startsWith('notif-')) continue;
+        const name = (v.name || '').trim();
+        if (!name || name === 'Untitled App' || name === 'Untitled') continue;
+        freshApps[k] = v;
+      }
       const count = Object.keys(freshApps).length;
       
       // Update in-memory apps state: Firestore snapshot is the authoritative source of record
@@ -628,6 +636,7 @@ export function StoreConfigProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteApp = async (appId: string, userId?: string, userEmail?: string): Promise<void> => {
+    AdminModerationService.deleteAppPermanently(appId);
     await deleteAppFromFirestore(appId, userId, userEmail);
     setApps(prev => {
       const next = { ...prev };
@@ -668,7 +677,17 @@ export function StoreConfigProvider({ children }: { children: ReactNode }) {
 
   // Complete unfiltered catalog with moderation status flags
   const rawAllAppListings: AppListing[] = useMemo(() => {
-    return appsList.map(app => {
+    return appsList
+      .filter(app => {
+        if (!app || !app.id) return false;
+        if (AdminModerationService.isAppDeleted(app.id)) return false;
+        if (app.id.startsWith('rev-') || app.id.startsWith('notif-')) return false;
+        if ((app as any).isDeleted || (app as any).status === 'deleted' || (app as any).isPublished === false) return false;
+        const name = (app.name || '').trim();
+        if (!name || name === 'Untitled App' || name === 'Untitled') return false;
+        return true;
+      })
+      .map(app => {
       const isBanned = AdminModerationService.isAppBanned(app.id);
       const isPrivate = AdminModerationService.isAppPrivate(app.id);
       const pubName = app.publisherName || app.developer;
