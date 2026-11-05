@@ -1330,14 +1330,17 @@ export default function AppDetailPage({
                        <MoreVertical className="w-5 h-5" />
                     </button>
                     {showMenu && (
-                      <div className="absolute right-2 top-full mt-1 w-52 bg-theme-card rounded-xl shadow-xl py-1.5 z-50 text-theme-text border border-theme-border/30 animate-in fade-in zoom-in-95 duration-100">
+                      <div 
+                        className="absolute right-2 top-full mt-1.5 w-56 rounded-2xl shadow-2xl py-2 z-50 border border-neutral-200 dark:border-[#3c4043] bg-white dark:bg-[#1e1f22] text-neutral-900 dark:text-[#e3e3e3]"
+                        style={{ backgroundColor: 'var(--theme-card, #1e1f22)', opacity: 1 }}
+                      >
                         <button 
                           type="button"
                           onClick={() => {
                             setShowMenu(false);
                             handleToggleBookmark();
                           }}
-                          className="w-full text-left px-4 py-2 hover:bg-theme-hover text-theme-text text-sm font-medium transition-colors cursor-pointer flex items-center gap-2.5"
+                          className="w-full text-left px-4 py-2.5 hover:bg-neutral-100 dark:hover:bg-[#2d2e30] text-theme-text text-sm font-medium transition-colors cursor-pointer flex items-center gap-3"
                         >
                           {isCurrentAppBookmarked ? (
                             <BookmarkCheck className="w-4 h-4 text-blue-500 dark:text-[#8ab4f8]" />
@@ -1352,7 +1355,7 @@ export default function AppDetailPage({
                             setShowMenu(false);
                             setIsFlagAppModalOpen(true);
                           }}
-                          className="w-full text-left px-4 py-2 hover:bg-theme-hover text-theme-text text-sm font-medium transition-colors cursor-pointer"
+                          className="w-full text-left px-4 py-2.5 hover:bg-neutral-100 dark:hover:bg-[#2d2e30] text-theme-text text-sm font-medium transition-colors cursor-pointer"
                         >
                           Flag as inappropriate
                         </button>
@@ -1422,14 +1425,17 @@ export default function AppDetailPage({
                      <MoreVertical className="w-5 h-5" />
                   </button>
                   {showMenu && (
-                    <div className="absolute right-2 top-full mt-1 w-52 bg-theme-card rounded-xl shadow-xl py-1.5 z-50 text-theme-text border border-theme-border/30 animate-in fade-in zoom-in-95 duration-100">
+                    <div 
+                      className="absolute right-2 top-full mt-1.5 w-56 rounded-2xl shadow-2xl py-2 z-50 border border-neutral-200 dark:border-[#3c4043] bg-white dark:bg-[#1e1f22] text-neutral-900 dark:text-[#e3e3e3]"
+                      style={{ backgroundColor: 'var(--theme-card, #1e1f22)', opacity: 1 }}
+                    >
                       <button 
                         type="button"
                         onClick={() => {
                           setShowMenu(false);
                           handleToggleBookmark();
                         }} 
-                        className="w-full text-left px-4 py-2 hover:bg-theme-hover text-theme-text text-sm font-medium transition-colors cursor-pointer flex items-center gap-2.5"
+                        className="w-full text-left px-4 py-2.5 hover:bg-neutral-100 dark:hover:bg-[#2d2e30] text-theme-text text-sm font-medium transition-colors cursor-pointer flex items-center gap-3"
                       >
                         {isCurrentAppBookmarked ? (
                           <BookmarkCheck className="w-4 h-4 text-blue-600 dark:text-[#8ab4f8]" />
@@ -1444,7 +1450,7 @@ export default function AppDetailPage({
                           setShowMenu(false);
                           setIsFlagAppModalOpen(true);
                         }} 
-                        className="w-full text-left px-4 py-2 hover:bg-theme-hover text-theme-text text-sm font-medium transition-colors cursor-pointer"
+                        className="w-full text-left px-4 py-2.5 hover:bg-neutral-100 dark:hover:bg-[#2d2e30] text-theme-text text-sm font-medium transition-colors cursor-pointer"
                       >
                         Flag as inappropriate
                       </button>
@@ -1532,14 +1538,17 @@ export default function AppDetailPage({
                   <MoreVertical className="w-4 h-4" />
                 </button>
                 {showMenu && (
-                  <div className="absolute right-0 top-full mt-1 w-52 bg-theme-card rounded-xl shadow-xl py-1.5 z-50 text-theme-text border border-theme-border/30 animate-in fade-in zoom-in-95 duration-100">
+                  <div 
+                    className="absolute right-0 top-full mt-1.5 w-56 rounded-2xl shadow-2xl py-2 z-50 border border-neutral-200 dark:border-[#3c4043] bg-white dark:bg-[#1e1f22] text-neutral-900 dark:text-[#e3e3e3]"
+                    style={{ backgroundColor: 'var(--theme-card, #1e1f22)', opacity: 1 }}
+                  >
                     <button 
                       type="button"
                       onClick={() => {
                         setShowMenu(false);
                         handleToggleBookmark();
                       }} 
-                      className="w-full text-left px-4 py-2 hover:bg-theme-hover text-theme-text text-xs font-medium transition-colors cursor-pointer flex items-center gap-2.5"
+                      className="w-full text-left px-4 py-2 hover:bg-neutral-100 dark:hover:bg-[#2d2e30] text-theme-text text-xs font-medium transition-colors cursor-pointer flex items-center gap-2.5"
                     >
                       {isCurrentAppBookmarked ? (
                         <BookmarkCheck className="w-3.5 h-3.5 text-blue-500 dark:text-[#8ab4f8]" />
@@ -1554,7 +1563,7 @@ export default function AppDetailPage({
                         setShowMenu(false);
                         setIsFlagAppModalOpen(true);
                       }} 
-                      className="w-full text-left px-4 py-2 hover:bg-theme-hover text-theme-text text-xs font-medium transition-colors cursor-pointer"
+                      className="w-full text-left px-4 py-2 hover:bg-neutral-100 dark:hover:bg-[#2d2e30] text-theme-text text-xs font-medium transition-colors cursor-pointer"
                     >
                       Flag as inappropriate
                     </button>

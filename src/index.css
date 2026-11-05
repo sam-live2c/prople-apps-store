@@ -344,4 +344,10 @@ html.light h4:not([class*="text-white"]):not([class*="text-amber"]):not([class*=
   content: '';
 }
 
+.bg-theme-card {
+  background-color: var(--theme-card, #1e1f22);
+  opacity: 1;
+}
+
+
 
