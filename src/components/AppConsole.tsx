@@ -817,41 +817,86 @@ export default function AppConsole({ onClose, onOpenAppDetail }: AppConsoleProps
     bottom?: number;
     right: number;
     transformOrigin: string;
+    maxHeight?: number;
   } | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const updateMenuPosition = useCallback((buttonEl: HTMLElement) => {
     const rect = buttonEl.getBoundingClientRect();
+    const vHeight = window.visualViewport?.height || window.innerHeight;
+    const vWidth = window.visualViewport?.width || window.innerWidth;
+
     // If element is scrolled completely out of view, close it
-    if (rect.bottom < 0 || rect.top > window.innerHeight) {
+    if (rect.bottom < 0 || rect.top > vHeight) {
       setOpenMenuAppId(null);
       setMenuCoords(null);
       menuTriggerRef.current = null;
       return;
     }
 
-    const estimatedMenuHeight = 250;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceAbove = rect.top;
+    const EDGE_MARGIN = 12;
+    const GAP = 6;
+    const menuWidth = 208; // w-52 = 13rem = 208px
+    const estimatedMenuHeight = 280;
+    const spaceBelow = vHeight - rect.bottom - GAP - EDGE_MARGIN;
+    const spaceAbove = rect.top - GAP - EDGE_MARGIN;
 
     // Flip upwards dynamically if space below is limited and space above is larger
     const openUpwards = spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
-    const rightOffset = Math.max(10, window.innerWidth - rect.right);
+    const rawRight = vWidth - rect.right;
+    const rightOffset = Math.max(10, Math.min(rawRight, vWidth - menuWidth - 10));
 
     if (openUpwards) {
       setMenuCoords({
-        bottom: window.innerHeight - rect.top + 6,
+        bottom: vHeight - rect.top + GAP,
         right: rightOffset,
         transformOrigin: 'bottom right',
+        maxHeight: Math.max(140, spaceAbove),
       });
     } else {
       setMenuCoords({
-        top: rect.bottom + 6,
+        top: rect.bottom + GAP,
         right: rightOffset,
         transformOrigin: 'top right',
+        maxHeight: Math.max(140, spaceBelow),
       });
     }
   }, []);
+
+  // Post-mount boundary check to prevent screen overflow
+  useEffect(() => {
+    if (!openMenuAppId || !menuTriggerRef.current) return;
+    const triggerEl = menuTriggerRef.current;
+    const timer = requestAnimationFrame(() => {
+      const menuEl = document.getElementById(`app-menu-dropdown-${openMenuAppId}`);
+      if (!menuEl || !triggerEl) return;
+      const menuRect = menuEl.getBoundingClientRect();
+      const triggerRect = triggerEl.getBoundingClientRect();
+      const vHeight = window.visualViewport?.height || window.innerHeight;
+      const vWidth = window.visualViewport?.width || window.innerWidth;
+      const GAP = 6;
+      const EDGE_MARGIN = 12;
+
+      if (menuRect.bottom > vHeight - EDGE_MARGIN) {
+        const spaceAbove = triggerRect.top - GAP - EDGE_MARGIN;
+        const spaceBelow = vHeight - triggerRect.bottom - GAP - EDGE_MARGIN;
+        if (spaceAbove > spaceBelow) {
+          setMenuCoords({
+            bottom: vHeight - triggerRect.top + GAP,
+            right: Math.max(10, Math.min(vWidth - triggerRect.right, vWidth - menuRect.width - 10)),
+            transformOrigin: 'bottom right',
+            maxHeight: Math.max(140, spaceAbove)
+          });
+        } else {
+          setMenuCoords(prev => prev ? {
+            ...prev,
+            maxHeight: Math.max(140, spaceBelow)
+          } : null);
+        }
+      }
+    });
+    return () => cancelAnimationFrame(timer);
+  }, [openMenuAppId]);
 
   const handleToggleMenu = useCallback((appId: string, buttonEl: HTMLButtonElement) => {
     if (openMenuAppId === appId) {
@@ -6407,7 +6452,7 @@ export default function AppConsole({ onClose, onOpenAppDetail }: AppConsoleProps
                 bottom: menuCoords.bottom !== undefined ? `${menuCoords.bottom}px` : undefined,
                 right: `${menuCoords.right}px`,
                 transformOrigin: menuCoords.transformOrigin,
-                maxHeight: 'calc(100vh - 32px)',
+                maxHeight: menuCoords.maxHeight !== undefined ? `${menuCoords.maxHeight}px` : 'calc(100vh - 32px)',
               }}
               className="w-52 bg-theme-card rounded-xl shadow-xl py-1.5 z-50 border border-theme-border/20 flex flex-col animate-in fade-in zoom-in-95 duration-100 overflow-y-auto scrollbar-hide"
               onClick={(e) => e.stopPropagation()}

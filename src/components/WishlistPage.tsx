@@ -47,6 +47,7 @@ export default function WishlistPage({
     bottom?: number;
     right: number;
     transformOrigin: string;
+    maxHeight?: number;
   } | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -101,23 +102,32 @@ export default function WishlistPage({
     }
 
     const rect = triggerBtn.getBoundingClientRect();
-    const viewportHeight = window.innerHeight;
-    const viewportWidth = window.innerWidth;
-    const estimatedMenuHeight = 180;
-    const spaceBelow = viewportHeight - rect.bottom;
-    const rightOffset = Math.max(12, viewportWidth - rect.right);
+    const vHeight = window.visualViewport?.height || window.innerHeight;
+    const vWidth = window.visualViewport?.width || window.innerWidth;
+    const EDGE_MARGIN = 12;
+    const GAP = 4;
+    const menuWidth = 208; // w-52 = 208px
+    const estimatedMenuHeight = 220;
+    const spaceBelow = vHeight - rect.bottom - GAP - EDGE_MARGIN;
+    const spaceAbove = rect.top - GAP - EDGE_MARGIN;
 
-    if (spaceBelow >= estimatedMenuHeight || spaceBelow > rect.top) {
+    const openUpwards = spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
+    const rawRight = vWidth - rect.right;
+    const rightOffset = Math.max(12, Math.min(rawRight, vWidth - menuWidth - 12));
+
+    if (openUpwards) {
       setMenuCoords({
-        top: rect.bottom + 4,
+        bottom: vHeight - rect.top + GAP,
         right: rightOffset,
-        transformOrigin: 'top right',
+        transformOrigin: 'bottom right',
+        maxHeight: Math.max(140, spaceAbove),
       });
     } else {
       setMenuCoords({
-        bottom: viewportHeight - rect.top + 4,
+        top: rect.bottom + GAP,
         right: rightOffset,
-        transformOrigin: 'bottom right',
+        transformOrigin: 'top right',
+        maxHeight: Math.max(140, spaceBelow),
       });
     }
 
@@ -360,7 +370,7 @@ export default function WishlistPage({
                 bottom: menuCoords.bottom !== undefined ? `${menuCoords.bottom}px` : undefined,
                 right: `${menuCoords.right}px`,
                 transformOrigin: menuCoords.transformOrigin,
-                maxHeight: 'calc(100vh - 32px)',
+                maxHeight: menuCoords.maxHeight !== undefined ? `${menuCoords.maxHeight}px` : 'calc(100vh - 32px)',
               }}
               className="w-52 bg-theme-card rounded-xl shadow-xl py-1.5 z-50 border border-theme-border/20 flex flex-col animate-in fade-in zoom-in-95 duration-100 overflow-y-auto scrollbar-hide"
               onClick={(e) => e.stopPropagation()}

@@ -613,12 +613,14 @@ export default function AdminControlPanel({
     bottom?: number;
     right: number;
     transformOrigin: string;
+    maxHeight?: number;
   } | null>(null);
   const [pubMenuCoords, setPubMenuCoords] = useState<{
     top?: number;
     bottom?: number;
     right: number;
     transformOrigin: string;
+    maxHeight?: number;
   } | null>(null);
   const appMenuTriggerRef = useRef<HTMLElement | null>(null);
   const pubMenuTriggerRef = useRef<HTMLElement | null>(null);
@@ -919,68 +921,161 @@ export default function AdminControlPanel({
     refreshData();
   }, [refreshData]);
 
-  // Dynamic menu positioning logic mirroring PublisherConsolePage
+  // Dynamic smart menu positioning with auto-flip and viewport collision prevention
   const updateAppMenuPosition = useCallback((buttonEl: HTMLElement) => {
     const rect = buttonEl.getBoundingClientRect();
-    if (rect.bottom < 0 || rect.top > window.innerHeight) {
+    const vHeight = window.visualViewport?.height || window.innerHeight;
+    const vWidth = window.visualViewport?.width || window.innerWidth;
+
+    if (rect.bottom < 0 || rect.top > vHeight) {
       setOpenMenuAppId(null);
       setAppMenuCoords(null);
       appMenuTriggerRef.current = null;
       return;
     }
 
-    const estimatedMenuHeight = 280;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceAbove = rect.top;
+    const EDGE_MARGIN = 12;
+    const GAP = 6;
+    const menuWidth = 224; // w-56 = 14rem = 224px
+    // App menu contains up to 8 actions (~360-390px)
+    const estimatedMenuHeight = 380;
+    const spaceBelow = vHeight - rect.bottom - GAP - EDGE_MARGIN;
+    const spaceAbove = rect.top - GAP - EDGE_MARGIN;
 
+    // Flip upwards dynamically if space below is limited and space above offers more or enough headroom
     const openUpwards = spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
-    const rightOffset = Math.max(16, window.innerWidth - rect.right);
+    const rawRight = vWidth - rect.right;
+    const rightOffset = Math.max(12, Math.min(rawRight, vWidth - menuWidth - 12));
 
     if (openUpwards) {
       setAppMenuCoords({
-        bottom: window.innerHeight - rect.top + 6,
+        bottom: vHeight - rect.top + GAP,
         right: rightOffset,
-        transformOrigin: 'bottom right'
+        transformOrigin: 'bottom right',
+        maxHeight: Math.max(140, spaceAbove)
       });
     } else {
       setAppMenuCoords({
-        top: rect.bottom + 6,
+        top: rect.bottom + GAP,
         right: rightOffset,
-        transformOrigin: 'top right'
+        transformOrigin: 'top right',
+        maxHeight: Math.max(140, spaceBelow)
       });
     }
   }, []);
 
   const updatePubMenuPosition = useCallback((buttonEl: HTMLElement) => {
     const rect = buttonEl.getBoundingClientRect();
-    if (rect.bottom < 0 || rect.top > window.innerHeight) {
+    const vHeight = window.visualViewport?.height || window.innerHeight;
+    const vWidth = window.visualViewport?.width || window.innerWidth;
+
+    if (rect.bottom < 0 || rect.top > vHeight) {
       setOpenMenuPublisherKey(null);
       setPubMenuCoords(null);
       pubMenuTriggerRef.current = null;
       return;
     }
 
-    const estimatedMenuHeight = 240;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceAbove = rect.top;
+    const EDGE_MARGIN = 12;
+    const GAP = 6;
+    const menuWidth = 224; // w-56 = 14rem = 224px
+    // Publisher menu contains 7 actions (~320-350px)
+    const estimatedMenuHeight = 350;
+    const spaceBelow = vHeight - rect.bottom - GAP - EDGE_MARGIN;
+    const spaceAbove = rect.top - GAP - EDGE_MARGIN;
 
+    // Flip upwards dynamically if space below cannot fit the full menu and space above is larger
     const openUpwards = spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
-    const rightOffset = Math.max(16, window.innerWidth - rect.right);
+    const rawRight = vWidth - rect.right;
+    const rightOffset = Math.max(12, Math.min(rawRight, vWidth - menuWidth - 12));
 
     if (openUpwards) {
       setPubMenuCoords({
-        bottom: window.innerHeight - rect.top + 6,
+        bottom: vHeight - rect.top + GAP,
         right: rightOffset,
-        transformOrigin: 'bottom right'
+        transformOrigin: 'bottom right',
+        maxHeight: Math.max(140, spaceAbove)
       });
     } else {
       setPubMenuCoords({
-        top: rect.bottom + 6,
+        top: rect.bottom + GAP,
         right: rightOffset,
-        transformOrigin: 'top right'
+        transformOrigin: 'top right',
+        maxHeight: Math.max(140, spaceBelow)
       });
     }
   }, []);
+
+  // Post-mount measurement to guarantee 0 overflow or clipping regardless of text wrapping
+  useEffect(() => {
+    if (!openMenuPublisherKey || !pubMenuTriggerRef.current) return;
+    const triggerEl = pubMenuTriggerRef.current;
+    const timer = requestAnimationFrame(() => {
+      const menuEl = document.getElementById(`admin-pub-menu-dropdown-${openMenuPublisherKey}`);
+      if (!menuEl || !triggerEl) return;
+      const menuRect = menuEl.getBoundingClientRect();
+      const triggerRect = triggerEl.getBoundingClientRect();
+      const vHeight = window.visualViewport?.height || window.innerHeight;
+      const vWidth = window.visualViewport?.width || window.innerWidth;
+      const GAP = 6;
+      const EDGE_MARGIN = 12;
+
+      if (menuRect.bottom > vHeight - EDGE_MARGIN) {
+        const spaceAbove = triggerRect.top - GAP - EDGE_MARGIN;
+        const spaceBelow = vHeight - triggerRect.bottom - GAP - EDGE_MARGIN;
+        if (spaceAbove > spaceBelow) {
+          // Flip upwards
+          setPubMenuCoords({
+            bottom: vHeight - triggerRect.top + GAP,
+            right: Math.max(12, Math.min(vWidth - triggerRect.right, vWidth - menuRect.width - 12)),
+            transformOrigin: 'bottom right',
+            maxHeight: Math.max(140, spaceAbove)
+          });
+        } else {
+          // Clamp maxHeight to available space below and allow scroll
+          setPubMenuCoords(prev => prev ? {
+            ...prev,
+            maxHeight: Math.max(140, spaceBelow)
+          } : null);
+        }
+      }
+    });
+    return () => cancelAnimationFrame(timer);
+  }, [openMenuPublisherKey]);
+
+  useEffect(() => {
+    if (!openMenuAppId || !appMenuTriggerRef.current) return;
+    const triggerEl = appMenuTriggerRef.current;
+    const timer = requestAnimationFrame(() => {
+      const menuEl = document.getElementById(`admin-menu-dropdown-${openMenuAppId}`);
+      if (!menuEl || !triggerEl) return;
+      const menuRect = menuEl.getBoundingClientRect();
+      const triggerRect = triggerEl.getBoundingClientRect();
+      const vHeight = window.visualViewport?.height || window.innerHeight;
+      const vWidth = window.visualViewport?.width || window.innerWidth;
+      const GAP = 6;
+      const EDGE_MARGIN = 12;
+
+      if (menuRect.bottom > vHeight - EDGE_MARGIN) {
+        const spaceAbove = triggerRect.top - GAP - EDGE_MARGIN;
+        const spaceBelow = vHeight - triggerRect.bottom - GAP - EDGE_MARGIN;
+        if (spaceAbove > spaceBelow) {
+          setAppMenuCoords({
+            bottom: vHeight - triggerRect.top + GAP,
+            right: Math.max(12, Math.min(vWidth - triggerRect.right, vWidth - menuRect.width - 12)),
+            transformOrigin: 'bottom right',
+            maxHeight: Math.max(140, spaceAbove)
+          });
+        } else {
+          setAppMenuCoords(prev => prev ? {
+            ...prev,
+            maxHeight: Math.max(140, spaceBelow)
+          } : null);
+        }
+      }
+    });
+    return () => cancelAnimationFrame(timer);
+  }, [openMenuAppId]);
 
   // Dismiss floating menus on scroll or resize immediately to maintain 60fps scrolling
   useEffect(() => {
@@ -2687,7 +2782,7 @@ export default function AdminControlPanel({
                 bottom: appMenuCoords.bottom !== undefined ? `${appMenuCoords.bottom}px` : undefined,
                 right: `${appMenuCoords.right}px`,
                 transformOrigin: appMenuCoords.transformOrigin,
-                maxHeight: 'calc(100vh - 32px)',
+                maxHeight: appMenuCoords.maxHeight !== undefined ? `${appMenuCoords.maxHeight}px` : 'calc(100vh - 32px)',
               }}
               className="w-56 bg-theme-card rounded-xl shadow-xl py-1.5 z-50 border border-theme-border/20 flex flex-col animate-in fade-in zoom-in-95 duration-100 overflow-y-auto scrollbar-hide"
               onClick={(e) => e.stopPropagation()}
@@ -2825,7 +2920,7 @@ export default function AdminControlPanel({
                 bottom: pubMenuCoords.bottom !== undefined ? `${pubMenuCoords.bottom}px` : undefined,
                 right: `${pubMenuCoords.right}px`,
                 transformOrigin: pubMenuCoords.transformOrigin,
-                maxHeight: 'calc(100vh - 32px)',
+                maxHeight: pubMenuCoords.maxHeight !== undefined ? `${pubMenuCoords.maxHeight}px` : 'calc(100vh - 32px)',
               }}
               className="w-56 bg-theme-card rounded-xl shadow-xl py-1.5 z-50 border border-theme-border/20 flex flex-col animate-in fade-in zoom-in-95 duration-100 overflow-y-auto scrollbar-hide"
               onClick={(e) => e.stopPropagation()}
