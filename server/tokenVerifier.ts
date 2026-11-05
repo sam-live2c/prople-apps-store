@@ -62,7 +62,8 @@ export async function verifySupabaseToken(rawToken?: string | null): Promise<Ver
     const uid = user.id;
     const email = (user.email || '').toLowerCase().trim();
     const emailVerified = Boolean(user.email_confirmed_at || user.confirmed_at);
-    const isAdmin = Boolean(email && (isStrictAdminEmail(email) || user.user_metadata?.is_admin));
+    // Security: Only allow isStrictAdminEmail or server-controlled app_metadata. Never trust user_metadata!
+    const isAdmin = Boolean(email && (isStrictAdminEmail(email) || user.app_metadata?.is_admin));
 
     const verified: VerifiedUser = {
       uid,

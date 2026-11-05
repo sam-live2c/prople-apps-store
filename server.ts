@@ -53,6 +53,7 @@ import {
   getAuthSessionStatus,
   consumeAuthSession,
   createSignedChallengeToken,
+  verifySignedChallengeTokenSignature,
   initOtpStoreDb,
   hashPassword,
   verifyPasswordHash
@@ -520,6 +521,31 @@ function sanitizeObject(obj: any): any {
     }
   }
   return result;
+}
+
+function sanitizeUserForResponse(user: any): any {
+  if (!user || typeof user !== 'object') return null;
+  const safe = { ...user };
+  delete safe.passwordHash;
+  delete safe.password;
+  delete safe.salt;
+  delete safe.resetToken;
+  delete safe.otpCode;
+  delete safe.challengeToken;
+  delete safe.rawPassword;
+  return safe;
+}
+
+function sanitizeAppForPublic(app: any): any {
+  if (!app || typeof app !== 'object') return null;
+  const safe = { ...app };
+  delete safe.passwordHash;
+  delete safe.password;
+  delete safe.salt;
+  delete safe.adminNotes;
+  delete safe.rawPayload;
+  delete safe.internalFlags;
+  return safe;
 }
 
 async function startServer() {
@@ -1491,14 +1517,14 @@ async function startServer() {
         }
       }
 
-      const verifiedUser = {
+      const verifiedUser = sanitizeUserForResponse({
         uid: userUid,
         email: cleanEmail,
         displayName: userAttributes.publisherName || userAttributes.displayName || displayName,
         publisherName: userAttributes.publisherName || "",
         isEmailVerified: true,
         ...userAttributes,
-      };
+      });
 
       // Reset any failed login attempts on successful authentication
       recordSuccessfulLogin(cleanEmail);
@@ -1730,13 +1756,13 @@ async function startServer() {
         }
       }
 
-      const finalUser = {
+      const finalUser = sanitizeUserForResponse({
         uid: userUid,
         email: cleanEmail,
         displayName,
         isEmailVerified: true,
         ...existingData,
-      };
+      });
 
       // Reset failed login attempts on successful password reset
       recordSuccessfulLogin(cleanEmail);
@@ -1848,8 +1874,19 @@ async function startServer() {
       if (!email) {
         return res.status(400).json({ success: false, error: "Missing email parameter." });
       }
+
+      const clientToken = (req.query.token || req.headers["x-challenge-token"] || req.headers["authorization"] || "").toString().trim();
+      const callerAuth = await authenticateApiRequest(req);
+      const isChallengeValid = clientToken ? verifySignedChallengeTokenSignature(clientToken, email).valid : false;
+
+      // Ensure caller is authorized for this email or is verified admin
+      if (!callerAuth.isVerifiedAdmin && !isChallengeValid && (!callerAuth.isAuthenticated || callerAuth.email?.toLowerCase().trim() !== email)) {
+        return res.status(401).json({ success: false, error: "Unauthorized: Challenge token or session authorization required." });
+      }
+
       const session = await getAuthSessionStatus(email);
-      return res.json({ success: true, ...session });
+      const sanitizedUser = session.user ? sanitizeUserForResponse(session.user) : undefined;
+      return res.json({ success: true, status: session.status, ...(sanitizedUser ? { user: sanitizedUser } : {}) });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
     }
@@ -1939,7 +1976,7 @@ async function startServer() {
 
         return res.json({
           success: true,
-          user: {
+          user: sanitizeUserForResponse({
             uid: userUid,
             email: cleanEmail,
             displayName,
@@ -1954,7 +1991,7 @@ async function startServer() {
             publisherRole: remoteData.publisherRole || "Standard User",
             developerKeystore: remoteData.developerKeystore || undefined,
             publishedAppIds: remoteData.publishedAppIds || [],
-          },
+          }),
         });
       }
 
@@ -2035,7 +2072,7 @@ async function startServer() {
         if (!hasValidSource && (data.name === 'App' || !data.versionName)) {
           return;
         }
-        apps.push({ id: d.id, ...data });
+        apps.push(sanitizeAppForPublic({ id: d.id, ...data }));
       });
       return res.json({ success: true, count: apps.length, apps });
     } catch (err: any) {
@@ -2044,7 +2081,7 @@ async function startServer() {
       } else {
         console.warn("[Backend] Notice fetching apps:", err.message);
       }
-      return res.json({ success: true, count: serverAppsCatalogCache.length, apps: serverAppsCatalogCache });
+      return res.json({ success: true, count: serverAppsCatalogCache.length, apps: serverAppsCatalogCache.map(sanitizeAppForPublic) });
     }
   });
 
@@ -2062,7 +2099,7 @@ async function startServer() {
       // 1. Try helper with caching and multi-field queries (ID, packageName, slug)
       const appData = await getAppForSeo(appId);
       if (appData) {
-        return res.json({ success: true, app: appData });
+        return res.json({ success: true, app: sanitizeAppForPublic(appData) });
       }
 
       // 2. Direct Firestore fallback check
@@ -2070,7 +2107,7 @@ async function startServer() {
         const appRef = serverDoc(serverDb, "apps", appId);
         const snap = await serverGetDoc(appRef);
         if (snap.exists()) {
-          return res.json({ success: true, app: { id: snap.id, ...snap.data() } });
+          return res.json({ success: true, app: sanitizeAppForPublic({ id: snap.id, ...snap.data() }) });
         }
       }
 
@@ -2080,7 +2117,7 @@ async function startServer() {
       if (err?.message?.includes('Missing or insufficient permissions') || err?.code === 'permission-denied') {
         const cached = requestedId ? serverAppsCatalogCache.find(a => a.id === requestedId || a.slug === requestedId) : null;
         if (cached) {
-          return res.json({ success: true, app: cached });
+          return res.json({ success: true, app: sanitizeAppForPublic(cached) });
         }
         return res.status(404).json({ success: false, error: "Application not found" });
       }
@@ -2516,7 +2553,11 @@ async function startServer() {
         return res.status(503).json({ success: false, error: "Service temporarily unavailable. Please try again." });
       }
 
-      if (!userId || userId === 'guest' || !userEmail) {
+      const callerAuth = await authenticateApiRequest(req);
+      const effectiveUid = callerAuth.uid || String(userId || '').trim();
+      const effectiveEmail = callerAuth.email || String(userEmail || '').toLowerCase().trim();
+
+      if (!callerAuth.isAuthenticated && (!effectiveUid || effectiveUid === 'guest' || !effectiveEmail)) {
         return res.status(401).json({
           success: false,
           error: "Unauthorized: You must be signed in with a verified account to update applications."
@@ -2530,30 +2571,30 @@ async function startServer() {
       }
 
       const existingData = snap.data();
-      const normUserEmail = (userEmail || '').toLowerCase().trim();
       const devEmail = (existingData.developerEmail || '').toLowerCase().trim();
       const pubEmail = (existingData.publisherEmail || '').toLowerCase().trim();
       const ownerEmail = (existingData.ownerEmail || '').toLowerCase().trim();
       const devInfoEmail = (existingData.developerInfo?.email || '').toLowerCase().trim();
 
-      const isMatchingEmail = normUserEmail && (
-        devEmail === normUserEmail ||
-        pubEmail === normUserEmail ||
-        ownerEmail === normUserEmail ||
-        devInfoEmail === normUserEmail
+      const isMatchingEmail = effectiveEmail && (
+        devEmail === effectiveEmail ||
+        pubEmail === effectiveEmail ||
+        ownerEmail === effectiveEmail ||
+        devInfoEmail === effectiveEmail
       );
 
-      const isOwner = 
-        (userId && (
-          existingData.owner === userId ||
-          existingData.developerId === userId ||
-          existingData.creatorUid === userId
-        )) ||
-        isMatchingEmail;
+      const isOwner = callerAuth.isVerifiedAdmin || (
+        callerAuth.isAuthenticated && (
+          (callerAuth.uid && (
+            existingData.owner === callerAuth.uid ||
+            existingData.developerId === callerAuth.uid ||
+            existingData.creatorUid === callerAuth.uid
+          )) ||
+          isMatchingEmail
+        )
+      );
 
-      const hasUpdatePermission = await hasAdminPermission(serverDb, 'UPDATE_APP', normUserEmail, userId);
-
-      if (!isOwner && !hasUpdatePermission) {
+      if (!isOwner) {
         return res.status(403).json({
           success: false,
           error: "Forbidden: You do not own this application and are not an authorized administrator."
@@ -2684,35 +2725,35 @@ async function startServer() {
   app.delete("/api/apps/:appId", async (req, res) => {
     try {
       const { appId } = req.params;
-      const userId = (req.body?.userId || req.query?.userId || req.headers['x-user-id'] || '').toString().trim();
-      const userEmail = (req.body?.userEmail || req.query?.userEmail || req.headers['x-user-email'] || '').toString().trim();
+      const callerAuth = await authenticateApiRequest(req);
 
-      if (!serverDb) {
-        return res.status(503).json({ success: false, error: "Service temporarily unavailable. Please try again." });
-      }
-
-      if ((!userId || userId === 'guest') && !userEmail) {
+      if (!callerAuth.isAuthenticated) {
         return res.status(401).json({
           success: false,
           error: "Unauthorized: You must be signed in with a verified account to delete applications."
         });
       }
 
-      const normUserEmail = (userEmail || '').toLowerCase().trim();
-      const hasDeletePermission = await hasAdminPermission(serverDb, 'DELETE_APP', normUserEmail, userId);
+      if (!serverDb) {
+        return res.status(503).json({ success: false, error: "Service temporarily unavailable. Please try again." });
+      }
+
+      if (callerAuth.isVerifiedAdmin) {
+        markAppDeletedServer(appId);
+        deleteAppFromSupabase(appId).catch(() => {});
+        if (serverDb) {
+          await serverDeleteDoc(serverDoc(serverDb, "apps", appId)).catch(() => {});
+        }
+        serverAppsCatalogCache = serverAppsCatalogCache.filter(a => a.id !== appId);
+        seoAppsCache.delete(appId.toLowerCase());
+        seoAppsCache.delete(appId);
+        deleteAppFromIndex(appId).catch(() => {});
+        return res.json({ success: true, deletedAppId: appId });
+      }
 
       const appRef = serverDoc(serverDb, "apps", appId);
       const snap = await serverGetDoc(appRef);
       if (!snap.exists()) {
-        if (hasDeletePermission || isAuthorizedAdmin(normUserEmail)) {
-          markAppDeletedServer(appId);
-          deleteAppFromSupabase(appId).catch(() => {});
-          serverAppsCatalogCache = serverAppsCatalogCache.filter(a => a.id !== appId);
-          seoAppsCache.delete(appId.toLowerCase());
-          seoAppsCache.delete(appId);
-          deleteAppFromIndex(appId).catch(() => {});
-          return res.json({ success: true, deletedAppId: appId });
-        }
         return res.status(404).json({ success: false, error: "Application not found" });
       }
 
@@ -2723,25 +2764,25 @@ async function startServer() {
       const authorEmail = (existingData.authorEmail || '').toLowerCase().trim();
       const devInfoEmail = (existingData.developerInfo?.email || '').toLowerCase().trim();
 
-      const isMatchingEmail = normUserEmail && (
-        devEmail === normUserEmail ||
-        pubEmail === normUserEmail ||
-        ownerEmail === normUserEmail ||
-        authorEmail === normUserEmail ||
-        devInfoEmail === normUserEmail
+      const isMatchingEmail = callerAuth.email && (
+        devEmail === callerAuth.email ||
+        pubEmail === callerAuth.email ||
+        ownerEmail === callerAuth.email ||
+        authorEmail === callerAuth.email ||
+        devInfoEmail === callerAuth.email
       );
 
-      const isOwner = 
-        (userId && (
-          existingData.owner === userId ||
-          existingData.developerId === userId ||
-          existingData.publisherId === userId ||
-          existingData.userId === userId ||
-          existingData.creatorUid === userId
-        )) ||
-        isMatchingEmail;
+      const isOwner = (
+        callerAuth.uid && (
+          existingData.owner === callerAuth.uid ||
+          existingData.developerId === callerAuth.uid ||
+          existingData.publisherId === callerAuth.uid ||
+          existingData.userId === callerAuth.uid ||
+          existingData.creatorUid === callerAuth.uid
+        )
+      ) || Boolean(isMatchingEmail);
 
-      if (!isOwner && !hasDeletePermission) {
+      if (!isOwner) {
         return res.status(403).json({
           success: false,
           error: "Forbidden: You do not own this application and are not an authorized administrator."
@@ -2765,7 +2806,7 @@ async function startServer() {
               isPublished: false,
               status: 'deleted',
               deletedAt: new Date().toISOString(),
-              deletedBy: normUserEmail || userId,
+              deletedBy: callerAuth.email || callerAuth.uid || 'authenticated-user',
               updatedAt: new Date().toISOString()
             }, { merge: true });
             deletedFromDb = true;
@@ -2810,6 +2851,10 @@ async function startServer() {
   });
 
   app.post("/api/admin/deleted-apps", async (req, res) => {
+    const isAuthorized = await verifyAdminRequest(req);
+    if (!isAuthorized) {
+      return res.status(403).json({ success: false, error: "Forbidden: Administrator authorization required." });
+    }
     const rawAppId = (req.body?.appId || req.query?.appId || '').toString().trim();
     if (!rawAppId) {
       return res.status(400).json({ success: false, error: "App ID is required" });
@@ -2838,12 +2883,23 @@ async function startServer() {
         return res.status(400).json({ success: false, error: "Missing userId or userEmail" });
       }
 
-      if (!serverDb) {
-        return res.status(503).json({ success: false, error: "Service temporarily unavailable. Please try again." });
-      }
-
       const cleanEmail = userEmail.toLowerCase().trim();
       const cleanUid = String(userId).trim();
+
+      const callerAuth = await authenticateApiRequest(req);
+      const challengeToken = (req.headers['x-challenge-token'] || req.body?.challengeToken || '') as string;
+      const isChallengeValid = challengeToken ? verifySignedChallengeTokenSignature(challengeToken, cleanEmail).valid : false;
+
+      const isAllowed = callerAuth.isVerifiedAdmin || isChallengeValid || (
+        callerAuth.isAuthenticated && (
+          callerAuth.email?.toLowerCase().trim() === cleanEmail ||
+          callerAuth.uid === cleanUid
+        )
+      );
+
+      if (!isAllowed) {
+        return res.status(401).json({ success: false, error: "Unauthorized: Caller must be authenticated as the account owner or administrator." });
+      }
 
       const appsCol = serverCollection(serverDb, "apps");
       const snap = await serverGetDocs(appsCol);
@@ -2955,6 +3011,18 @@ async function startServer() {
       const cleanEmail = (userEmail || '').toLowerCase().trim();
       const cleanUid = (userId || '').trim();
 
+      const callerAuth = await authenticateApiRequest(req);
+      const isAllowed = callerAuth.isVerifiedAdmin || (
+        callerAuth.isAuthenticated && (
+          (cleanEmail && callerAuth.email?.toLowerCase().trim() === cleanEmail) ||
+          (cleanUid && callerAuth.uid === cleanUid)
+        )
+      );
+
+      if (!isAllowed) {
+        return res.status(401).json({ success: false, error: "Unauthorized: You can only update your own publisher profile." });
+      }
+
       if (!serverDb) {
         return res.status(503).json({ success: false, error: "Database service unavailable" });
       }
@@ -3050,6 +3118,18 @@ async function startServer() {
       const cleanUid = String(userId || '').trim();
       if (!cleanEmail && !cleanUid) {
         return res.status(400).json({ success: false, error: "Missing userId or userEmail" });
+      }
+
+      const callerAuth = await authenticateApiRequest(req);
+      const isAllowed = callerAuth.isVerifiedAdmin || (
+        callerAuth.isAuthenticated && (
+          (cleanEmail && callerAuth.email?.toLowerCase().trim() === cleanEmail) ||
+          (cleanUid && callerAuth.uid === cleanUid)
+        )
+      );
+
+      if (!isAllowed) {
+        return res.status(401).json({ success: false, error: "Unauthorized: You can only update your own user profile." });
       }
 
       const finalName = (publisherName || displayName || '').trim();
@@ -3548,8 +3628,10 @@ async function startServer() {
   app.delete("/api/apps/:appId/reviews/:reviewId", async (req, res) => {
     try {
       const { appId, reviewId } = req.params;
-      const userId = (req.body?.userId || req.query?.userId || req.headers['x-user-id'] || '').toString().trim();
-      const userEmail = (req.body?.userEmail || req.query?.userEmail || req.headers['x-user-email'] || '').toString().trim();
+      const callerAuth = await authenticateApiRequest(req);
+      if (!callerAuth.isAuthenticated) {
+        return res.status(401).json({ success: false, error: "Unauthorized: Authentication required to delete reviews." });
+      }
 
       // Remove from server store
       const currentList = serverReviewsStore.get(appId) || [];
@@ -3562,9 +3644,8 @@ async function startServer() {
           const snap = await serverGetDoc(revRef).catch(() => null);
           if (snap && snap.exists()) {
             const revData = snap.data();
-            const isAdmin = await isAuthorizedAdmin(serverDb, userEmail, userId).catch(() => false);
-            const isAuthor = (userId && revData.userId === userId) || (userEmail && revData.userEmail === userEmail);
-            if (!isAdmin && !isAuthor && userId && revData.userId) {
+            const isAuthor = (callerAuth.uid && revData.userId === callerAuth.uid) || (callerAuth.email && revData.userEmail === callerAuth.email);
+            if (!callerAuth.isVerifiedAdmin && !isAuthor) {
               return res.status(403).json({ success: false, error: "Forbidden: You are not authorized to delete this review." });
             }
           }
@@ -3610,7 +3691,23 @@ async function startServer() {
 
       const cleanEmail = userEmail.toLowerCase().trim();
       const cleanUid = String(userId).trim();
-      let isAdmin = isServerAdminEmail(cleanEmail);
+
+      const callerAuth = await authenticateApiRequest(req);
+      const challengeToken = (req.headers['x-challenge-token'] || req.body?.challengeToken || '') as string;
+      const isChallengeValid = challengeToken ? verifySignedChallengeTokenSignature(challengeToken, cleanEmail).valid : false;
+
+      const isAllowed = callerAuth.isVerifiedAdmin || isChallengeValid || (
+        callerAuth.isAuthenticated && (
+          callerAuth.email?.toLowerCase().trim() === cleanEmail ||
+          callerAuth.uid === cleanUid
+        )
+      );
+
+      if (!isAllowed) {
+        return res.status(401).json({ success: false, error: "Unauthorized: Valid authentication token or challenge signature required." });
+      }
+
+      let isAdmin = callerAuth.isVerifiedAdmin || isServerAdminEmail(cleanEmail);
       try {
         const adminsCol = serverCollection(serverDb, "admins");
         const adminSnap = await serverGetDocs(adminsCol);
@@ -4285,6 +4382,11 @@ async function startServer() {
   // Endpoint to trigger or ensure fresh-start reset of all user names and publisher_registry
   app.post("/api/publishers/reset-all-names", async (req, res) => {
     try {
+      const isAuthorized = await verifyAdminRequest(req);
+      if (!isAuthorized) {
+        return res.status(403).json({ success: false, error: "Forbidden: Administrator authorization required." });
+      }
+
       if (!serverDb) {
         return res.json({ success: true, message: "Standalone mode" });
       }
@@ -4327,36 +4429,29 @@ async function startServer() {
   });
 
   async function verifyAdminRequest(req: express.Request): Promise<boolean> {
-    const authHeader = req.headers['authorization'];
-    const bearerToken = typeof authHeader === 'string' && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
-    const bodyEmail = (req.body?.userEmail || req.query?.userEmail || req.headers['x-user-email'] || '').toString().trim().toLowerCase();
-    const bodyUid = (req.body?.userId || req.query?.userId || req.headers['x-user-id'] || '').toString().trim();
+    // 1. Secret / Internal key check via constant-time verification
+    const adminSecret = (req.headers['x-admin-secret'] || req.headers['x-internal-key'] || req.body?.adminSecret || '') as string;
+    if (adminSecret && verifySecuritySecret(adminSecret)) {
+      return true;
+    }
 
-    // 1. If Bearer token is provided, verify against Supabase Auth
-    if (bearerToken) {
+    // 2. Authoritative Bearer token verification via Supabase JWT
+    const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+    const rawToken = typeof authHeader === 'string' ? authHeader.replace(/^Bearer\s+/i, '').trim() : '';
+
+    if (rawToken) {
       try {
-        const verified = await verifySupabaseToken(bearerToken);
+        const verified = await verifySupabaseToken(rawToken);
         if (verified) {
           if (isServerAdminEmail(verified.email) || verified.isAdmin) return true;
           if (serverDb) {
             const adminDoc = await serverGetDoc(serverDoc(serverDb, "admins", verified.uid));
-            if (adminDoc.exists()) return true;
+            if (adminDoc && adminDoc.exists()) return true;
           }
         }
       } catch (err: any) {
         console.warn("[AdminAuth] Token verification notice:", err.message);
       }
-    }
-
-    // 2. Internal security key verification
-    const internalKey = req.headers['x-internal-key'];
-    if (process.env.INTERNAL_SECURITY_KEY && internalKey === process.env.INTERNAL_SECURITY_KEY) {
-      return true;
-    }
-
-    // 3. Centralized Admin Permissions Service check (Firestore admins collection, RBAC, and defaults)
-    if (await isAuthorizedAdmin(serverDb, bodyEmail, bodyUid)) {
-      return true;
     }
 
     return false;
@@ -4500,23 +4595,29 @@ async function startServer() {
   // Supabase Backend Integration: Complete Status & Health Diagnostic
   app.get("/api/supabase/status", async (req, res) => {
     try {
+      const isAuthorized = await verifyAdminRequest(req);
       const diagnostics = await getSupabaseDiagnostics();
       const appsReady = Boolean(diagnostics.tables.apps?.ready);
       const appsCount = diagnostics.tables.apps?.count || 0;
+
+      if (!isAuthorized) {
+        return res.json({
+          success: true,
+          connected: diagnostics.connected,
+          appsCount,
+          tableReady: appsReady,
+        });
+      }
 
       return res.json({
         success: true,
         connected: diagnostics.connected,
         latencyMs: diagnostics.latencyMs,
-        projectUrl: diagnostics.projectUrl,
         auth: diagnostics.auth,
         tables: diagnostics.tables,
         tableReady: appsReady,
         appsCount,
         schemaSqlFile: 'supabase/schema.sql',
-        notice: diagnostics.connected
-          ? `Supabase is connected. Apps: ${appsCount}, Auth Providers: Google (${diagnostics.auth.google}), GitHub (${diagnostics.auth.github}), Email (${diagnostics.auth.email}).`
-          : `Supabase connection could not be established.`
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
@@ -4530,6 +4631,22 @@ async function startServer() {
       if (!profile || (!profile.uid && !profile.id) || !profile.email) {
         return res.status(400).json({ success: false, error: "Missing profile uid or email" });
       }
+
+      const callerAuth = await authenticateApiRequest(req);
+      const targetEmail = (profile.email || '').toLowerCase().trim();
+      const targetUid = String(profile.uid || profile.id || '').trim();
+
+      const isAllowed = callerAuth.isVerifiedAdmin || (
+        callerAuth.isAuthenticated && (
+          (targetEmail && callerAuth.email?.toLowerCase().trim() === targetEmail) ||
+          (targetUid && callerAuth.uid === targetUid)
+        )
+      );
+
+      if (!isAllowed) {
+        return res.status(401).json({ success: false, error: "Unauthorized: You can only synchronize your own profile." });
+      }
+
       const result = await upsertProfileToSupabase(profile);
       return res.json(result);
     } catch (err: any) {
@@ -4540,6 +4657,11 @@ async function startServer() {
   // Supabase Data Migration: Copy all catalog apps from Firestore to Supabase
   app.post("/api/supabase/migrate", async (req, res) => {
     try {
+      const isAuthorized = await verifyAdminRequest(req);
+      if (!isAuthorized) {
+        return res.status(403).json({ success: false, error: "Forbidden: Administrator authorization required." });
+      }
+
       const allApps = await getAllAppsServer(1000);
       if (allApps.length === 0) {
         return res.json({ success: true, message: "No catalog apps found to migrate.", migratedCount: 0 });

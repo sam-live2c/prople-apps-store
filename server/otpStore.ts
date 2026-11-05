@@ -183,6 +183,40 @@ export function verifyChallengeToken(
   }
 }
 
+/**
+ * Validates the HMAC cryptographic signature and expiration of a signed challenge token
+ * for a specific user email.
+ */
+export function verifySignedChallengeTokenSignature(
+  token: string | undefined | null,
+  email: string
+): { valid: boolean; error?: string } {
+  if (!token || typeof token !== 'string' || !token.includes('.')) {
+    return { valid: false, error: 'Invalid challenge token format' };
+  }
+  try {
+    const [b64Payload, sig] = token.split('.');
+    const secret = getStableInternalSecret();
+    const expectedSig = crypto.createHmac('sha256', secret).update(b64Payload).digest('base64url');
+    if (!timingSafeStringMatch(sig, expectedSig)) {
+      return { valid: false, error: 'Cryptographic challenge signature mismatch' };
+    }
+    const payloadJson = Buffer.from(b64Payload, 'base64url').toString('utf8');
+    const data = JSON.parse(payloadJson);
+    const norm = email.toLowerCase().trim();
+    if (data.e !== norm) {
+      return { valid: false, error: 'Challenge token subject mismatch' };
+    }
+    // Check expiration with 3-minute grace period for clock skew
+    if (Date.now() > data.exp + 3 * 60 * 1000) {
+      return { valid: false, error: 'Challenge token has expired. Please request a new code.' };
+    }
+    return { valid: true };
+  } catch {
+    return { valid: false, error: 'Failed to decode challenge token' };
+  }
+}
+
 const RTDB_URL = (process.env.DATABASE_URL || '').replace(/\/$/, '');
 const isRtdbConfigured = Boolean(
   RTDB_URL &&

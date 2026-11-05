@@ -1358,27 +1358,29 @@ export default async function handler(req: any, res: any) {
 
       // Check Firestore REST API publisher_registry if project/db config is available
       try {
-        const projectId = process.env.FIREBASE_PROJECT_ID || 'prople-store-3efed';
+        const projectId = process.env.FIREBASE_PROJECT_ID || '';
         const databaseId =
           process.env.FIRESTORE_DATABASE_ID ||
           process.env.FIREBASE_DATABASE_ID ||
-          'ai-studio-propleappsstore-4d19d2a3-eb86-4e65-b516-f36ed2be36fd';
+          '(default)';
         const apiKey = process.env.FIREBASE_API_KEY || '';
-        const regUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents/publisher_registry/${encodeURIComponent(cleanAlpha)}${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
-        const regRes = await fetch(regUrl, { signal: AbortSignal.timeout(3000) });
-        if (regRes.ok) {
-          const docJson: any = await regRes.json();
-          const fields = docJson?.fields || {};
-          const isActive = fields.isActive?.booleanValue !== false;
-          const ownerUid = (fields.ownerUid?.stringValue || fields.userId?.stringValue || '').trim();
-          const ownerEmail = (fields.ownerEmail?.stringValue || '').toLowerCase().trim();
-          const sameOwner = Boolean((curUid && ownerUid && curUid === ownerUid) || (curEmail && ownerEmail && curEmail === ownerEmail));
-          if (isActive && !sameOwner) {
-            return res.status(200).json({
-              available: false,
-              isTaken: true,
-              message: `The publisher name "${rawName}" is already claimed by another developer.`,
-            });
+        if (projectId) {
+          const regUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents/publisher_registry/${encodeURIComponent(cleanAlpha)}${apiKey ? `?key=${encodeURIComponent(apiKey)}` : ''}`;
+          const regRes = await fetch(regUrl, { signal: AbortSignal.timeout(3000) });
+          if (regRes.ok) {
+            const docJson: any = await regRes.json();
+            const fields = docJson?.fields || {};
+            const isActive = fields.isActive?.booleanValue !== false;
+            const ownerUid = (fields.ownerUid?.stringValue || fields.userId?.stringValue || '').trim();
+            const ownerEmail = (fields.ownerEmail?.stringValue || '').toLowerCase().trim();
+            const sameOwner = Boolean((curUid && ownerUid && curUid === ownerUid) || (curEmail && ownerEmail && curEmail === ownerEmail));
+            if (isActive && !sameOwner) {
+              return res.status(200).json({
+                available: false,
+                isTaken: true,
+                message: `The publisher name "${rawName}" is already claimed by another developer.`,
+              });
+            }
           }
         }
       } catch {}
