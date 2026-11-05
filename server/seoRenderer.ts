@@ -24,7 +24,9 @@ export interface SeoAppMetadata {
   downloads?: string;
   downloadsCount?: number;
   versionName?: string;
+  size?: string;
   sizeString?: string;
+  targetOs?: string;
   downloadUrl?: string;
   assetName?: string;
   sha256?: string;
@@ -59,6 +61,66 @@ export function slugifyAppName(name: string): string {
     .replace(/[^\w\s-]/g, '')
     .replace(/[\s_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+export function isGeneratedOpaqueId(str?: string): boolean {
+  if (!str) return true;
+  const s = str.trim().toLowerCase();
+  return (
+    s.startsWith('gh-app-') ||
+    s.startsWith('app-') ||
+    s.startsWith('app_') ||
+    s.startsWith('appmarket-') ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i.test(s) ||
+    /^\d+$/i.test(s)
+  );
+}
+
+export function getCanonicalAppSlug(app: any): string {
+  if (!app) return '';
+  const rawSlug = typeof app.slug === 'string' ? app.slug.trim().toLowerCase() : '';
+  const name = typeof app.name === 'string' ? app.name.trim() : '';
+  const rawId = typeof app.id === 'string' ? app.id.trim() : '';
+
+  // 1. If slug is explicitly provided AND is NOT an auto-generated opaque ID, use it
+  if (rawSlug && !isGeneratedOpaqueId(rawSlug)) {
+    return slugifyAppName(rawSlug);
+  }
+
+  // 2. Derive human-readable keyword-rich slug from app name
+  if (name) {
+    const slugFromName = slugifyAppName(name);
+    if (slugFromName) return slugFromName;
+  }
+
+  // 3. Fallback to slug or id
+  return rawSlug || rawId;
+}
+
+export function formatPlatformDisplayName(p?: string): string {
+  const clean = (p || 'Android').trim().toLowerCase();
+  if (clean.includes('android')) return 'Android';
+  if (clean.includes('win')) return 'Windows';
+  if (clean.includes('linux')) return 'Linux';
+  if (clean.includes('mac') || clean.includes('osx') || clean.includes('darwin')) return 'macOS';
+  if (clean.includes('apple') || clean.includes('ios') || clean.includes('ipad')) return 'iOS';
+  if (clean.includes('web') || clean.includes('pwa')) return 'Web';
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+export function mapCategoryToSchemaAppType(cat?: string): string {
+  const c = (cat || '').toLowerCase();
+  if (c.includes('game')) return 'GameApplication';
+  if (c.includes('social') || c.includes('chat') || c.includes('communication') || c.includes('messag')) return 'CommunicationApplication';
+  if (c.includes('finance') || c.includes('crypto') || c.includes('banking') || c.includes('money')) return 'FinanceApplication';
+  if (c.includes('photo') || c.includes('video') || c.includes('music') || c.includes('audio') || c.includes('player') || c.includes('stream')) return 'MultimediaApplication';
+  if (c.includes('tool') || c.includes('utilit')) return 'UtilitiesApplication';
+  if (c.includes('productiv') || c.includes('office') || c.includes('task') || c.includes('business')) return 'BusinessApplication';
+  if (c.includes('developer') || c.includes('code') || c.includes('terminal') || c.includes('git')) return 'DeveloperApplication';
+  if (c.includes('educat') || c.includes('learn') || c.includes('book') || c.includes('read')) return 'EducationalApplication';
+  if (c.includes('health') || c.includes('fit') || c.includes('medic')) return 'HealthApplication';
+  if (c.includes('security')) return 'SecurityApplication';
+  return 'SoftwareApplication';
 }
 
 /**
@@ -98,8 +160,8 @@ export function injectAppSeoIntoHtml(
   options?: { injectBodyShell?: boolean }
 ): string {
   const name = escapeHtml(app.name || 'Application');
-  const canonicalSlug = app.slug || slugifyAppName(app.name) || app.id;
-  const platform = escapeHtml((app.platform || 'Android').toUpperCase());
+  const canonicalSlug = getCanonicalAppSlug(app);
+  const platform = formatPlatformDisplayName(app.platform);
   const category = escapeHtml(app.category || 'Tools');
   const categorySlug = slugifyAppName(app.category || 'tools');
   const developer = escapeHtml(app.developer || 'Verified Publisher');
@@ -120,7 +182,7 @@ export function injectAppSeoIntoHtml(
   const prodCanonicalBase = 'https://www.prople.co.in';
   const canonicalUrl = `${prodCanonicalBase}/apps/${encodeURIComponent(canonicalSlug)}`;
   
-  const exactAsset = app.assetName || `${slugifyAppName(app.name)}.${(app.packageFormat || 'apk').toLowerCase()}`;
+  const exactAsset = app.assetName || `${canonicalSlug}.${(app.packageFormat || 'apk').toLowerCase()}`;
   const safeDownloadHref = app.downloadUrl 
     ? `/api/download-apk?url=${encodeURIComponent(app.downloadUrl)}&name=${encodeURIComponent(exactAsset)}&platform=${encodeURIComponent(app.platform || 'android')}`
     : canonicalUrl;
@@ -132,20 +194,28 @@ export function injectAppSeoIntoHtml(
   const version = escapeHtml(app.versionName || '1.0.0');
   const pkgFormat = escapeHtml(app.packageFormat || 'APK').toUpperCase();
 
-  // Page title formatted for high-intent search engine queries: "Termux (APK) Download — Android App | Prople Store"
-  const pageTitle = `${name} (${pkgFormat}) Download — ${platform} App | Prople Store`;
-  const metaDescription = escapeHtml(`Download ${app.name} (${pkgFormat}) for ${platform} on Prople Store. Free, verified, and safe release published by ${app.developer || 'Verified Publisher'}. ${rawDesc.slice(0, 110)}`.replace(/[\r\n]+/g, ' ').trim());
+  // High-Intent Search Title tailored to rank for "<App> F-Droid", "<App> APK Download", "<App> Prople Store"
+  const pageTitle = `${name} — Download ${platform} App (${pkgFormat}) | Prople Store`;
+  const metaDescription = escapeHtml(`Download ${name} for ${platform} (${pkgFormat}) on Prople Store — Free, open-source and verified application repository. Released by ${developer}. ${rawDesc.slice(0, 130)}`.replace(/[\r\n]+/g, ' ').trim());
 
   // 1. SoftwareApplication Schema.org JSON-LD
   const softwareAppJsonLd: any = {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
     name: app.name,
+    alternateName: [
+      app.name,
+      `${app.name} (${pkgFormat})`,
+      `${app.name} for ${platform}`,
+      `${app.name} APK Download`
+    ],
     description: rawDesc,
-    applicationCategory: app.category || 'Tools',
-    operatingSystem: app.platform || 'Android, iOS, iPadOS, macOS, Linux, Windows, Web Browser',
+    applicationCategory: mapCategoryToSchemaAppType(app.category),
+    operatingSystem: platform === 'Android' ? 'Android 7.0 and up' : platform,
+    fileSize: app.size || app.sizeString || undefined,
     url: canonicalUrl,
     downloadUrl: downloadHref,
+    installUrl: canonicalUrl,
     image: socialShareIconUrl,
     screenshot: socialFeatureGraphicUrl,
     softwareVersion: version,
@@ -158,7 +228,7 @@ export function injectAppSeoIntoHtml(
     publisher: {
       '@type': 'Organization',
       name: 'Cloaktail Industries',
-      url: baseUrl,
+      url: 'https://www.prople.co.in',
     },
     author: {
       '@type': 'Organization',
@@ -214,8 +284,9 @@ export function injectAppSeoIntoHtml(
     <!-- Dynamic Pre-Rendered SEO Tags for ${name} -->
     <title>${pageTitle}</title>
     <meta name="description" content="${metaDescription}" />
-    <meta name="keywords" content="${name}, ${name} ${pkgFormat}, ${name} download, ${name} prople, ${name} prople store, ${category} app, ${platform} application, free download, verified installer, prople store" />
+    <meta name="keywords" content="${name}, ${name} ${pkgFormat}, ${name} download, ${name} apk, ${name} prople, ${name} prople store, ${name} alternative, ${name} open source, ${name} fdroid, download ${name} for ${platform}, ${category} app, ${platform} application, free verified download, prople store" />
     <meta name="author" content="${developer}" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <link rel="canonical" href="${canonicalUrl}" />
 
     <!-- OpenGraph Metadata -->
@@ -369,7 +440,7 @@ export function injectCategorySeoIntoHtml(
     url: canonicalUrl,
     numberOfItems: categoryApps.length,
     itemListElement: categoryApps.slice(0, 30).map((app, index) => {
-      const slug = app.slug || slugifyAppName(app.name) || app.id;
+      const slug = getCanonicalAppSlug(app);
       return {
         '@type': 'ListItem',
         position: index + 1,
@@ -413,7 +484,7 @@ export function injectCategorySeoIntoHtml(
   const appsListHtml = categoryApps.length > 0 ? `
     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 20px;">
       ${categoryApps.map(a => {
-        const slug = a.slug || slugifyAppName(a.name) || a.id;
+        const slug = getCanonicalAppSlug(a);
         const icon = resolveAbsoluteImageUrl(a.iconUrl, baseUrl, '/logo.png');
         return `
           <a href="${baseUrl}/apps/${encodeURIComponent(slug)}" style="display: flex; gap: 12px; padding: 12px; background: #1e1f22; border-radius: 14px; text-decoration: none; color: #e3e3e3;">
@@ -442,7 +513,7 @@ export function injectCategorySeoIntoHtml(
     </main>
   `;
 
-  return cleanAndInjectHtml(html, headInject, options?.injectBodyShell === true ? preRenderedContent : '');
+  return cleanAndInjectHtml(html, headInject, options?.injectBodyShell !== false ? preRenderedContent : '');
 }
 
 /**
@@ -489,7 +560,7 @@ export function injectDeveloperSeoIntoHtml(
   const appsListHtml = developerApps.length > 0 ? `
     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 20px;">
       ${developerApps.map(a => {
-        const slug = a.slug || slugifyAppName(a.name) || a.id;
+        const slug = getCanonicalAppSlug(a);
         const icon = resolveAbsoluteImageUrl(a.iconUrl, baseUrl, '/logo.png');
         return `
           <a href="${baseUrl}/apps/${encodeURIComponent(slug)}" style="display: flex; gap: 12px; padding: 12px; background: #1e1f22; border-radius: 14px; text-decoration: none; color: #e3e3e3;">
@@ -517,7 +588,7 @@ export function injectDeveloperSeoIntoHtml(
     </main>
   `;
 
-  return cleanAndInjectHtml(html, headInject, options?.injectBodyShell === true ? preRenderedContent : '');
+  return cleanAndInjectHtml(html, headInject, options?.injectBodyShell !== false ? preRenderedContent : '');
 }
 
 /**
@@ -566,7 +637,7 @@ export function injectPlatformSeoIntoHtml(
   const appsListHtml = platformApps.length > 0 ? `
     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin-top: 20px;">
       ${platformApps.map(a => {
-        const slug = a.slug || slugifyAppName(a.name) || a.id;
+        const slug = getCanonicalAppSlug(a);
         const icon = resolveAbsoluteImageUrl(a.iconUrl, baseUrl, '/logo.png');
         return `
           <a href="${baseUrl}/apps/${encodeURIComponent(slug)}" style="display: flex; gap: 12px; padding: 12px; background: #1e1f22; border-radius: 14px; text-decoration: none; color: #e3e3e3;">
@@ -594,7 +665,7 @@ export function injectPlatformSeoIntoHtml(
     </main>
   `;
 
-  return cleanAndInjectHtml(html, headInject, options?.injectBodyShell === true ? preRenderedContent : '');
+  return cleanAndInjectHtml(html, headInject, options?.injectBodyShell !== false ? preRenderedContent : '');
 }
 
 /**
@@ -621,7 +692,7 @@ export function injectHomeSeoIntoHtml(
     url: canonicalUrl,
     numberOfItems: topApps.length,
     itemListElement: topApps.map((app, index) => {
-      const slug = app.slug || slugifyAppName(app.name) || app.id;
+      const slug = getCanonicalAppSlug(app);
       return {
         '@type': 'ListItem',
         position: index + 1,
@@ -714,7 +785,7 @@ export function injectHomeSeoIntoHtml(
           </div>
           <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px;">
             ${topApps.map(a => {
-              const slug = a.slug || slugifyAppName(a.name) || a.id;
+              const slug = getCanonicalAppSlug(a);
               const icon = resolveAbsoluteImageUrl(a.iconUrl, baseUrl, '/logo.png');
               const devSlug = slugifyAppName(a.developer || 'developer');
               const catSlug = slugifyAppName(a.category || 'tools');
@@ -819,7 +890,7 @@ export function injectHomeSeoIntoHtml(
     </div>
   `;
 
-  return cleanAndInjectHtml(html, headInject, options?.injectBodyShell === true ? preRenderedContent : '');
+  return cleanAndInjectHtml(html, headInject, options?.injectBodyShell !== false ? preRenderedContent : '');
 }
 
 /**

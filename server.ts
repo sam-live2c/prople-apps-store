@@ -33,7 +33,9 @@ import {
   injectPlatformSeoIntoHtml,
   injectHomeSeoIntoHtml,
   renderNotFoundHtml,
-  slugifyAppName
+  slugifyAppName,
+  getCanonicalAppSlug,
+  isGeneratedOpaqueId
 } from "./server/seoRenderer.ts";
 import { 
   generateOtp, 
@@ -751,7 +753,7 @@ async function startServer() {
             const app = d.data();
             if (app.isPublished !== false) {
               const appName = app.name || d.id;
-              const canonicalSlug = app.slug || slugifyAppName(appName) || d.id;
+              const canonicalSlug = getCanonicalAppSlug(app);
               const summary = app.shortDescription || (app.description ? app.description.slice(0, 140).replace(/[\r\n]+/g, " ") : "Verified application");
               const category = app.category || "Tools";
               const platform = app.platform || "Android, Windows, Linux";
@@ -818,7 +820,7 @@ async function startServer() {
             const app = d.data();
             if (app.isPublished !== false) {
               const appName = app.name || d.id;
-              const canonicalSlug = app.slug || slugifyAppName(appName) || d.id;
+              const canonicalSlug = getCanonicalAppSlug(app);
               catalog += `\n### ${appName}\n`;
               catalog += `- **Direct Install Page**: ${domain}/apps/${encodeURIComponent(canonicalSlug)}\n`;
               catalog += `- **Publisher**: ${app.developer || "Verified Publisher"}\n`;
@@ -953,7 +955,7 @@ async function startServer() {
       let urls = "";
       for (const app of allApps) {
         if (app && app.isPublished !== false) {
-          const canonicalSlug = app.slug || slugifyAppName(app.name) || app.id;
+          const canonicalSlug = getCanonicalAppSlug(app);
           if (seenAppSlugs.has(canonicalSlug)) continue;
           seenAppSlugs.add(canonicalSlug);
           const lastMod = formatIsoDate(app.updatedAt || app.createdAt, now);
@@ -1115,7 +1117,7 @@ async function startServer() {
 
       for (const app of allApps) {
         if (app && app.isPublished !== false) {
-          const canonicalSlug = app.slug || slugifyAppName(app.name) || app.id;
+          const canonicalSlug = getCanonicalAppSlug(app);
           if (seenAppSlugs.has(canonicalSlug)) continue;
           seenAppSlugs.add(canonicalSlug);
           const lastMod = formatIsoDate(app.updatedAt || app.createdAt, now);
@@ -6139,22 +6141,29 @@ async function startServer() {
       seoAppsCache.set(app.name.toLowerCase(), { data: app, timestamp: now });
       seoAppsCache.set(app.name.toLowerCase().replace(/[^a-z0-9]/g, ''), { data: app, timestamp: now });
     }
+    const canonical = getCanonicalAppSlug(app);
+    if (canonical) {
+      seoAppsCache.set(canonical.toLowerCase(), { data: app, timestamp: now });
+      seoAppsCache.set(canonical.toLowerCase().replace(/[^a-z0-9]/g, ''), { data: app, timestamp: now });
+    }
     if (app.packageName) {
       seoAppsCache.set(app.packageName.toLowerCase(), { data: app, timestamp: now });
     }
   }
 
-  let isFetchingAllApps = false;
-  async function getAllAppsServer(maxWaitMs = 2500): Promise<any[]> {
+  let activeFetchPromise: Promise<any[]> | null = null;
+  async function getAllAppsServer(maxWaitMs = 8000): Promise<any[]> {
     const now = Date.now();
     // Cache valid for 3 minutes
     if (serverAppsCatalogCache.length > 0 && now - serverAppsCatalogCacheTime < 180000) {
       return serverAppsCatalogCache;
     }
 
-    const fetchPromise = (async () => {
-      if (isFetchingAllApps) return serverAppsCatalogCache;
-      isFetchingAllApps = true;
+    if (activeFetchPromise) {
+      return activeFetchPromise;
+    }
+
+    activeFetchPromise = (async () => {
       try {
         // Method 1: Check Supabase PostgreSQL apps table
         try {
@@ -6193,16 +6202,12 @@ async function startServer() {
         console.warn("[Server] Notice getting all apps:", e.message);
         return serverAppsCatalogCache;
       } finally {
-        isFetchingAllApps = false;
+        activeFetchPromise = null;
       }
     })();
 
-    if (serverAppsCatalogCache.length > 0) {
-      return serverAppsCatalogCache;
-    }
-
     return Promise.race([
-      fetchPromise,
+      activeFetchPromise,
       new Promise<any[]>((resolve) => setTimeout(() => resolve(serverAppsCatalogCache), maxWaitMs)),
     ]);
   }
@@ -6290,11 +6295,13 @@ async function startServer() {
             if (app.packageName && app.packageName.toLowerCase() === cleanId) return true;
             if (app.slug && app.slug.toLowerCase() === cleanId) return true;
             if (app.name && app.name.toLowerCase() === cleanId) return true;
+            const canonicalSlug = getCanonicalAppSlug(app);
             const nameSlug = slugifyAppName(app.name || '');
             const idSlug = slugifyAppName(app.id || '');
             const rawNameSlug = (app.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             const rawIdSlug = (app.id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
             return Boolean(
+              (canonicalSlug && (canonicalSlug === cleanId || canonicalSlug === cleanSlug)) ||
               (nameSlug && (nameSlug === cleanId || nameSlug === cleanSlug)) ||
               (idSlug && (idSlug === cleanId || idSlug === cleanSlug)) ||
               (rawNameSlug && (rawNameSlug === cleanSlug || rawNameSlug === cleanId)) ||
@@ -6644,13 +6651,13 @@ async function startServer() {
             return res.status(200).send(rawHtml);
           }
 
-          // Canonical Slug Redirect: If accessed by raw ID but clean name slug exists, 301 redirect
-          const canonicalSlug = appData.slug || slugifyAppName(appData.name) || appData.id;
-          if (requestedSlug !== canonicalSlug && requestedSlug === appData.id && appData.name) {
+          // Canonical Slug Redirect: If accessed by raw ID or old opaque slug but clean name slug exists, 301 redirect
+          const canonicalSlug = getCanonicalAppSlug(appData);
+          if (requestedSlug !== canonicalSlug && appData.name && (requestedSlug === appData.id || isGeneratedOpaqueId(requestedSlug))) {
             return res.redirect(301, `/apps/${encodeURIComponent(canonicalSlug)}`);
           }
 
-          let transformedHtml = injectAppSeoIntoHtml(rawHtml, appData, baseUrl, { injectBodyShell: isCrawler });
+          let transformedHtml = injectAppSeoIntoHtml(rawHtml, appData, baseUrl, { injectBodyShell: true });
           const hydrationJson = JSON.stringify(appData)
             .replace(/</g, '\\u003c')
             .replace(/>/g, '\\u003e')
@@ -6690,7 +6697,7 @@ async function startServer() {
         const rawHtml = await getBaseTemplate();
         if (!rawHtml) return next();
 
-        const transformedHtml = injectCategorySeoIntoHtml(rawHtml, matchedCategory, baseUrl, categoryApps, { injectBodyShell: isCrawler });
+        const transformedHtml = injectCategorySeoIntoHtml(rawHtml, matchedCategory, baseUrl, categoryApps, { injectBodyShell: true });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
         return res.send(transformedHtml);
@@ -6712,7 +6719,7 @@ async function startServer() {
         const rawHtml = await getBaseTemplate();
         if (!rawHtml) return next();
 
-        const transformedHtml = injectDeveloperSeoIntoHtml(rawHtml, developerName, baseUrl, devApps, { injectBodyShell: isCrawler });
+        const transformedHtml = injectDeveloperSeoIntoHtml(rawHtml, developerName, baseUrl, devApps, { injectBodyShell: true });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
         return res.send(transformedHtml);
@@ -6748,7 +6755,7 @@ async function startServer() {
         const rawHtml = await getBaseTemplate();
         if (!rawHtml) return next();
 
-        const transformedHtml = injectPlatformSeoIntoHtml(rawHtml, platformParam, baseUrl, platformApps, { injectBodyShell: isCrawler });
+        const transformedHtml = injectPlatformSeoIntoHtml(rawHtml, platformParam, baseUrl, platformApps, { injectBodyShell: true });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
         return res.send(transformedHtml);
@@ -6759,7 +6766,7 @@ async function startServer() {
         const rawHtml = await getBaseTemplate();
         if (rawHtml) {
           const allApps = await getAllAppsServer(400);
-          const transformedHtml = injectHomeSeoIntoHtml(rawHtml, baseUrl, allApps, [], { injectBodyShell: isCrawler });
+          const transformedHtml = injectHomeSeoIntoHtml(rawHtml, baseUrl, allApps, [], { injectBodyShell: true });
           res.setHeader('Content-Type', 'text/html; charset=utf-8');
           res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
           return res.send(transformedHtml);

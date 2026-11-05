@@ -582,7 +582,7 @@ export function StoreConfigProvider({ children }: { children: ReactNode }) {
           appRating: app.rating ?? 0,
           appIcon: app.iconUrl,
           appDownloads: app.downloads || '0+',
-          targetUrl: `/apps/${app.id}`,
+          targetUrl: `/apps/${encodeURIComponent((app.name ? app.name.toLowerCase().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, '') : '') || app.id)}`,
           isActive: true,
           displayOrder: prev.length + 1
         };

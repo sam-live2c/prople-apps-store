@@ -220,15 +220,55 @@ export async function fetchAppsFromSupabase(limit = 500): Promise<any[]> {
 export async function fetchAppFromSupabase(idOrSlug: string): Promise<any | null> {
   try {
     const client = getSupabaseAdminClient();
+    const clean = (idOrSlug || '').trim();
+    if (!clean) return null;
+
+    // 1. Direct ID or slug query
     const { data, error } = await client
       .from('apps')
       .select('*')
-      .or(`id.eq.${idOrSlug},slug.eq.${idOrSlug}`)
+      .or(`id.eq.${clean},slug.eq.${clean}`)
       .limit(1)
       .maybeSingle();
 
-    if (error || !data) return null;
-    return mapSupabaseRowToApp(data);
+    if (!error && data) return mapSupabaseRowToApp(data);
+
+    // 2. Direct package_name query
+    const { data: pkgData } = await client
+      .from('apps')
+      .select('*')
+      .eq('package_name', clean)
+      .limit(1)
+      .maybeSingle();
+
+    if (pkgData) return mapSupabaseRowToApp(pkgData);
+
+    // 3. Normalized name slug search
+    const cleanWord = clean.replace(/[-_]+/g, ' ').trim();
+    if (cleanWord.length >= 2) {
+      const { data: nameMatches } = await client
+        .from('apps')
+        .select('*')
+        .ilike('name', `%${cleanWord}%`)
+        .limit(5);
+
+      if (nameMatches && nameMatches.length > 0) {
+        for (const row of nameMatches) {
+          const app = mapSupabaseRowToApp(row);
+          const computedSlug = (app.name || '')
+            .toLowerCase()
+            .replace(/[^\w\s-]/g, '')
+            .replace(/[\s_-]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+          if (computedSlug === clean.toLowerCase() || app.name.toLowerCase() === clean.toLowerCase()) {
+            return app;
+          }
+        }
+        return mapSupabaseRowToApp(nameMatches[0]);
+      }
+    }
+
+    return null;
   } catch {
     return null;
   }
