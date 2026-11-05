@@ -11,7 +11,7 @@ import {
   Maximize2,
   Download
 } from 'lucide-react';
-import { useInstall, getDirectDownloadUrl } from '../context/InstallContext';
+import { useInstall, getDirectDownloadUrl, extractExactPackageFileName } from '../context/InstallContext';
 import { useStoreConfig } from '../context/StoreConfigContext';
 import { useReviews } from '../context/ReviewContext';
 import { useAuth } from '../context/AuthContext';
@@ -1009,34 +1009,37 @@ export default function SearchResultsPage({
 
         {/* 2. App Details Page Direct Download Action */}
         <div className="px-1 sm:px-3 py-2.5 flex items-center">
-          <button 
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
+          {(() => {
+            const targetPlat = (app.platform === 'ios' || isIOSApp(app))
+              ? 'ios'
+              : (app.platform === 'linux' || isLinuxApp(app)) 
+              ? 'linux' 
+              : (app.platform === 'windows' || isWindowsApp(app)) 
+              ? 'windows' 
+              : (app.platform === 'mac' || isMacApp(app)) 
+              ? 'mac' 
+              : 'android';
+            const directUrl = getDirectDownloadUrl(app.downloadUrl, app.assetName, targetPlat) || (app.downloadUrl && app.downloadUrl !== '#' ? app.downloadUrl : '');
+            const exactFileName = extractExactPackageFileName(directUrl, app.assetName) || app.assetName || '';
+
+            const handleDownloadClick = (e: React.MouseEvent) => {
               e.stopPropagation();
-              const targetPlat = (app.platform === 'ios' || isIOSApp(app))
-                ? 'ios'
-                : (app.platform === 'linux' || isLinuxApp(app)) 
-                ? 'linux' 
-                : (app.platform === 'windows' || isWindowsApp(app)) 
-                ? 'windows' 
-                : (app.platform === 'mac' || isMacApp(app)) 
-                ? 'mac' 
-                : 'android';
               startInstall(app.id, {
-                downloadUrl: app.downloadUrl,
+                downloadUrl: directUrl || app.downloadUrl,
                 appName: app.name,
                 sizeString: getUnifiedAppSize(app),
                 iconUrl: app.iconUrl,
                 sha256: app.sha256,
-                fileName: app.assetName,
+                fileName: exactFileName,
                 platform: targetPlat,
-                packageFormat: app.packageFormat
+                packageFormat: app.packageFormat,
+                skipNativeDispatch: !!directUrl,
               });
-            }}
-            className="w-full sm:w-auto sm:min-w-[180px] sm:max-w-xs sm:px-8 h-11 bg-[#0b57d0] hover:bg-[#0842a0] text-white dark:bg-[#a8c7fa] dark:hover:bg-[#d3e3fd] dark:active:bg-[#7cacf8] dark:text-[#041e49] font-medium font-google-sans rounded-full text-sm sm:text-base transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer select-none"
-          >
-            {(app.platform === 'ios' || isIOSApp(app)) ? (
+            };
+
+            const buttonStyle = "w-full sm:w-auto sm:min-w-[180px] sm:max-w-xs sm:px-8 h-11 bg-[#0b57d0] hover:bg-[#0842a0] text-white dark:bg-[#a8c7fa] dark:hover:bg-[#d3e3fd] dark:active:bg-[#7cacf8] dark:text-[#041e49] font-medium font-google-sans rounded-full text-sm sm:text-base transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer select-none no-underline border-0";
+
+            const icon = (app.platform === 'ios' || isIOSApp(app)) ? (
               <AppleIcon className="w-4 h-4 shrink-0" />
             ) : (app.platform === 'linux' || isLinuxApp(app)) ? (
               <LinuxIcon className="w-4 h-4 shrink-0" />
@@ -1046,9 +1049,35 @@ export default function SearchResultsPage({
               <MacIcon className="w-4 h-4 shrink-0" />
             ) : (
               <AndroidIcon className="w-4 h-4 shrink-0" />
-            )}
-            <span>{getAppPrimaryActionLabel(app)}</span>
-          </button>
+            );
+
+            if (directUrl) {
+              return (
+                <a
+                  href={directUrl}
+                  download={exactFileName || true}
+                  target="_self"
+                  rel="noopener noreferrer"
+                  onClick={handleDownloadClick}
+                  className={buttonStyle}
+                >
+                  {icon}
+                  <span>{getAppPrimaryActionLabel(app)}</span>
+                </a>
+              );
+            }
+
+            return (
+              <button 
+                type="button"
+                onClick={handleDownloadClick}
+                className={buttonStyle}
+              >
+                {icon}
+                <span>{getAppPrimaryActionLabel(app)}</span>
+              </button>
+            );
+          })()}
         </div>
 
         {/* 3. Search Result Media Carousel - Interactive horizontal screenshot & video carousel */}

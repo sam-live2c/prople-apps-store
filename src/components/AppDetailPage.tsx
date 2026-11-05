@@ -1183,13 +1183,13 @@ export default function AppDetailPage({
   };
 
   const handleDownloadAction = (e?: React.MouseEvent) => {
-    e?.preventDefault();
     e?.stopPropagation();
     if (!app || !app.downloadUrl) return;
 
     const now = Date.now();
     if (now - lastDownloadClickRef.current < 1200) {
-      return; // Debounce rapid multiple taps
+      e?.preventDefault(); // Debounce rapid multiple taps
+      return;
     }
     lastDownloadClickRef.current = now;
 
@@ -1205,7 +1205,7 @@ export default function AppDetailPage({
       fileName: exactFileName || app.assetName,
       platform: resolvedPlatform,
       packageFormat: app.packageFormat,
-      skipNativeDispatch: false,
+      skipNativeDispatch: true,
     });
   };
 
@@ -1685,14 +1685,17 @@ export default function AppDetailPage({
                     </div>
                   ) : (
                     <div key="state-download-mob" className="flex flex-col gap-2 w-full">
-                      <button 
-                        type="button"
+                      <a 
+                        href={getDirectDownloadUrl(app.downloadUrl, app.assetName, resolvedPlatform) || app.downloadUrl}
+                        download={extractExactPackageFileName(app.downloadUrl, app.assetName) || true}
+                        target="_self"
+                        rel="noopener noreferrer"
                         onClick={handleDownloadAction}
-                        className="w-full h-11 bg-[#0b57d0] hover:bg-[#0842a0] text-white dark:bg-[#a8c7fa] dark:hover:bg-[#d3e3fd] dark:active:bg-[#7cacf8] dark:text-[#041e49] font-medium font-google-sans rounded-full text-sm sm:text-base transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer select-none border-0"
+                        className="w-full h-11 bg-[#0b57d0] hover:bg-[#0842a0] text-white dark:bg-[#a8c7fa] dark:hover:bg-[#d3e3fd] dark:active:bg-[#7cacf8] dark:text-[#041e49] font-medium font-google-sans rounded-full text-sm sm:text-base transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer select-none border-0 no-underline"
                       >
                         {resolvedPlatform === 'ios' ? <AppleIcon className="w-4 h-4 shrink-0" /> : resolvedPlatform === 'mac' ? <MacIcon className="w-4 h-4 shrink-0" /> : resolvedPlatform === 'windows' ? <WindowsIcon className="w-4 h-4 shrink-0" /> : resolvedPlatform === 'linux' ? <LinuxIcon className="w-4 h-4 shrink-0" /> : <AndroidIcon className="w-4 h-4 shrink-0" />}
                         <span>{getAppActionFileLabel(app, resolvedPlatform)}</span>
-                      </button>
+                      </a>
                     </div>
                   )}
 
@@ -1843,14 +1846,17 @@ export default function AppDetailPage({
                         <span>Coming Soon</span>
                       </button>
                     ) : (
-                      <button 
-                        type="button"
+                      <a 
+                        href={getDirectDownloadUrl(app.downloadUrl, app.assetName, resolvedPlatform) || app.downloadUrl}
+                        download={extractExactPackageFileName(app.downloadUrl, app.assetName) || true}
+                        target="_self"
+                        rel="noopener noreferrer"
                         onClick={handleDownloadAction}
-                        className="h-11 px-7 bg-[#0b57d0] hover:bg-[#0842a0] text-white dark:bg-[#a8c7fa] dark:hover:bg-[#d3e3fd] dark:text-[#041e49] font-medium font-google-sans rounded-full text-sm sm:text-base transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer select-none border-0"
+                        className="h-11 px-7 bg-[#0b57d0] hover:bg-[#0842a0] text-white dark:bg-[#a8c7fa] dark:hover:bg-[#d3e3fd] dark:text-[#041e49] font-medium font-google-sans rounded-full text-sm sm:text-base transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer select-none border-0 no-underline"
                       >
                         {resolvedPlatform === 'ios' ? <AppleIcon className="w-4 h-4 shrink-0" /> : resolvedPlatform === 'mac' ? <MacIcon className="w-4 h-4 shrink-0" /> : resolvedPlatform === 'windows' ? <WindowsIcon className="w-4 h-4 shrink-0" /> : resolvedPlatform === 'linux' ? <LinuxIcon className="w-4 h-4 shrink-0" /> : <AndroidIcon className="w-4 h-4 shrink-0" />}
                         <span>{getAppActionFileLabel(app, resolvedPlatform)}</span>
-                      </button>
+                      </a>
                     )}
 
                     {/* Wishlist Button */}

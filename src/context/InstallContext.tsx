@@ -201,22 +201,15 @@ export function getDirectDownloadUrl(downloadUrl?: string, fileName?: string, pl
     return '';
   }
 
-  const exactName = extractExactPackageFileName(cleanUrl, fileName);
-
-  // ALWAYS stream through same-origin /api/download-apk so users NEVER navigate to GitHub or leave Prople Store!
-  const params = new URLSearchParams();
-  params.set('url', cleanUrl);
-  if (exactName) params.set('name', exactName);
-  if (platform) params.set('platform', platform);
-  return `/api/download-apk?${params.toString()}`;
+  // Directly return authentic binary package URL for on-page direct download
+  return cleanUrl;
 }
 
 /**
  * Instant Zero-Buffering Native Stream Dispatcher:
- * Triggers native browser download directly via Prople Store same-origin streaming proxy (/api/download-apk)
- * - Zero Prople Store window navigation, zero GitHub redirect tabs, zero address bar loading interruptions
- * - Streams directly with Content-Disposition: attachment for immediate native OS notification tray download
- * - Uses only the exact package filename (no bloat fallback files)
+ * Directly triggers on-page native browser download
+ * - No popup tab (target !== '_blank'), downloads natively within the active page
+ * - Zero server egress, zero streaming proxies
  */
 export function dispatchInstantNativeDownload(
   targetUrl: string,
@@ -268,21 +261,8 @@ export function dispatchInstantNativeDownload(
     return { success: false, error: err };
   }
 
-  // ALWAYS stream through same-origin /api/download-apk so the user never navigates away from Prople Store!
-  let sameOriginDownloadUrl = cleanUrl;
-  if (!cleanUrl.startsWith('/api/download-apk') && !cleanUrl.startsWith('blob:')) {
-    const params = new URLSearchParams();
-    params.set('url', cleanUrl);
-    const fallbackCleanName = fileName ? decodeURIComponent(fileName.split('?')[0].split('#')[0].split('/').pop() || '').trim() : '';
-    if (exactFileName || fallbackCleanName) {
-      params.set('name', exactFileName || fallbackCleanName);
-    }
-    if (platform) params.set('platform', platform);
-    sameOriginDownloadUrl = `/api/download-apk?${params.toString()}`;
-  }
-
   try {
-    triggerAnchorDownload(sameOriginDownloadUrl, exactFileName);
+    triggerAnchorDownload(cleanUrl, exactFileName);
     return { success: true };
   } catch (err: any) {
     const msg = err?.message || 'Failed to start package download.';
@@ -293,39 +273,32 @@ export function dispatchInstantNativeDownload(
 
 function triggerAnchorDownload(url: string, fileName?: string) {
   try {
-    const isSameOrigin = url.startsWith('/') || (typeof window !== 'undefined' && url.startsWith(window.location.origin));
-
-    // For same-origin streamed downloads, use a hidden iframe to initiate the browser's download manager
-    // without navigating the SPA, without flashing an empty blank tab, and without leaving Prople Store!
-    if (isSameOrigin) {
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      iframe.setAttribute('aria-hidden', 'true');
-      iframe.tabIndex = -1;
-      iframe.src = url;
-      document.body.appendChild(iframe);
-      setTimeout(() => {
-        if (document.body.contains(iframe)) {
-          document.body.removeChild(iframe);
-        }
-      }, 60000);
-      return;
-    }
+    const cleanName = fileName ? decodeURIComponent(fileName.split('?')[0].split('#')[0].split('/').pop() || '').trim() : '';
 
     const a = document.createElement('a');
     a.href = url;
-    a.removeAttribute('target');
-    if (fileName) {
-      a.download = fileName;
-      a.setAttribute('download', fileName);
+    if (cleanName) {
+      a.download = cleanName;
+      a.setAttribute('download', cleanName);
+    } else {
+      a.setAttribute('download', '');
     }
+    a.rel = 'noopener noreferrer';
+    a.target = '_self';
     a.style.display = 'none';
+    a.style.position = 'fixed';
+    a.style.left = '-9999px';
+    a.style.top = '-9999px';
     document.body.appendChild(a);
+
     a.click();
+
     setTimeout(() => {
-      if (document.body.contains(a)) {
-        document.body.removeChild(a);
-      }
+      try {
+        if (document.body.contains(a)) {
+          document.body.removeChild(a);
+        }
+      } catch {}
     }, 2000);
   } catch (err) {
     console.warn('[InstallContext] triggerAnchorDownload notice:', err);

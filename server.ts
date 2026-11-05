@@ -5958,14 +5958,16 @@ async function startServer() {
     }
 
     const clientIp = getNormalizedClientIp(req);
-    const rateCheck = globalDownloadRateLimiter.check(clientIp);
-    if (!rateCheck.allowed) {
-      res.setHeader('Retry-After', String(rateCheck.retryAfterSec));
-      return res.status(429).json({
-        success: false,
-        error: "Download rate limit exceeded. Please wait before initiating new package downloads.",
-        retryAfterSec: rateCheck.retryAfterSec
-      });
+    if (clientIp !== '127.0.0.1' && clientIp !== '::1' && clientIp !== 'localhost') {
+      const rateCheck = globalDownloadRateLimiter.check(clientIp);
+      if (!rateCheck.allowed) {
+        res.setHeader('Retry-After', String(rateCheck.retryAfterSec));
+        return res.status(429).json({
+          success: false,
+          error: "Download rate limit exceeded. Please wait before initiating new package downloads.",
+          retryAfterSec: rateCheck.retryAfterSec
+        });
+      }
     }
 
     const isHeadRequest = req.method === 'HEAD';
@@ -6007,10 +6009,9 @@ async function startServer() {
 
       if (rawUrl.includes('github.com') && (!initialPkg.isBinary || (!rawUrl.includes('/releases/download/') && !rawUrl.includes('/raw/')))) {
         const resolution = await resolveGitHubApkUrl(rawUrl, platform);
-        if (!resolution.isBinary || !resolution.resolvedUrl) {
-          return res.status(204).end();
+        if (resolution.resolvedUrl) {
+          targetBinaryUrl = resolution.resolvedUrl;
         }
-        targetBinaryUrl = resolution.resolvedUrl;
         if (resolution.assetName) {
           resolvedExactName = resolution.assetName;
         }
@@ -6024,15 +6025,15 @@ async function startServer() {
       try {
         parsedTarget = new URL(targetBinaryUrl);
       } catch {
-        return res.status(204).end();
+        return res.status(400).json({ success: false, error: "Invalid target URL format." });
       }
 
       if (parsedTarget.protocol !== 'http:' && parsedTarget.protocol !== 'https:') {
-        return res.status(204).end();
+        return res.status(400).json({ success: false, error: "Invalid URL protocol." });
       }
 
       if (isPrivateOrReservedHost(parsedTarget.hostname)) {
-        return res.status(403).end();
+        return res.status(403).json({ success: false, error: "Private or internal host blocked." });
       }
 
       // Step 2: Stream the authentic binary directly on-site to the client response with SSRF-safe redirect checks:
@@ -6044,13 +6045,23 @@ async function startServer() {
         if ((hopParsed.protocol !== 'http:' && hopParsed.protocol !== 'https:') || isPrivateOrReservedHost(hopParsed.hostname)) {
           return res.status(403).end();
         }
+
+        const fetchHeaders: Record<string, string> = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': '*/*'
+        };
+        if (req.headers.range) {
+          fetchHeaders['Range'] = String(req.headers.range);
+        }
+        if (process.env.GITHUB_TOKEN && currentFetchUrl.includes('github.com')) {
+          fetchHeaders['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+        }
+
         const hopRes = await fetch(currentFetchUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Accept': '*/*'
-          },
+          headers: fetchHeaders,
           redirect: 'manual'
         });
+
         if ([301, 302, 303, 307, 308].includes(hopRes.status)) {
           const loc = hopRes.headers.get('location');
           if (!loc) {
@@ -6068,8 +6079,11 @@ async function startServer() {
         break;
       }
 
+      // Fallback: If upstream rejected server fetch (e.g. rate limit), redirect directly to client
       if (!upstreamRes || !upstreamRes.ok || !upstreamRes.body) {
-        return res.status(204).end();
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        return res.redirect(302, currentFetchUrl || targetBinaryUrl);
       }
 
       // Extract exact package filename from Content-Disposition, resolved asset, URL, or redirected URL
@@ -6098,19 +6112,24 @@ async function startServer() {
         safeFileName = customCleanName;
       } else if (dispFileName && !isBloatAsset(dispFileName)) {
         safeFileName = dispFileName;
-      }
-
-      if (!safeFileName) {
-        try { await upstreamRes.body.cancel(); } catch {}
-        return res.status(204).end();
+      } else if (customCleanName) {
+        safeFileName = customCleanName;
+      } else if (urlBaseName) {
+        safeFileName = urlBaseName;
+      } else {
+        safeFileName = 'application-package.bin';
       }
 
       const cleanSafeName = safeFileName.replace(/["\r\n]/g, '');
       const lowerName = cleanSafeName.toLowerCase();
       let mimeType = upstreamRes.headers.get('content-type') || 'application/octet-stream';
 
-      if (mimeType.includes('text/html') || mimeType.includes('application/json') || mimeType.includes('text/plain')) {
-        return res.status(204).end();
+      // If upstream returned HTML document, redirect to target URL so user can view or handle in browser
+      if (mimeType.includes('text/html')) {
+        try { await upstreamRes.body.cancel(); } catch {}
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        return res.redirect(302, currentFetchUrl || targetBinaryUrl);
       }
 
       // Exact MIME type mapping for binary packages
@@ -6132,6 +6151,22 @@ async function startServer() {
         mimeType = 'application/x-newton-compatible-pkg';
       } else if (lowerName.endsWith('.ipa')) {
         mimeType = 'application/x-itunes-ipa';
+      } else if (lowerName.endsWith('.tar.gz') || lowerName.endsWith('.tgz')) {
+        mimeType = 'application/gzip';
+      } else if (lowerName.endsWith('.zip')) {
+        mimeType = 'application/zip';
+      } else if (lowerName.endsWith('.7z')) {
+        mimeType = 'application/x-7z-compressed';
+      }
+
+      if (isHeadRequest) {
+        try { await upstreamRes.body.cancel(); } catch {}
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Disposition', `attachment; filename="${cleanSafeName}"`);
+        const len = upstreamRes.headers.get('content-length');
+        if (len) res.setHeader('Content-Length', len);
+        res.setHeader('Accept-Ranges', 'bytes');
+        return res.status(200).end();
       }
 
       try {
@@ -6191,6 +6226,12 @@ async function startServer() {
       if (lowerName.endsWith('.apk') || lowerName.endsWith('.aab')) mimeType = 'application/vnd.android.package-archive';
       else if (lowerName.endsWith('.exe')) mimeType = 'application/x-msdownload';
       else if (lowerName.endsWith('.msi')) mimeType = 'application/x-msi';
+      else if (lowerName.endsWith('.deb')) mimeType = 'application/vnd.debian.binary-package';
+      else if (lowerName.endsWith('.rpm')) mimeType = 'application/x-redhat-package-manager';
+      else if (lowerName.endsWith('.appimage')) mimeType = 'application/x-executable';
+      else if (lowerName.endsWith('.dmg')) mimeType = 'application/x-apple-diskimage';
+      else if (lowerName.endsWith('.pkg')) mimeType = 'application/x-newton-compatible-pkg';
+      else if (lowerName.endsWith('.ipa')) mimeType = 'application/x-itunes-ipa';
       else if (lowerName.endsWith('.msix')) mimeType = 'application/msix';
       else if (lowerName.endsWith('.zip')) mimeType = 'application/zip';
 
@@ -6212,7 +6253,7 @@ async function startServer() {
       res.setHeader('Referrer-Policy', 'no-referrer');
       return res.redirect(302, targetUrl);
     } catch (err: any) {
-      console.error("[Backend] Download proxy redirect error:", err.message);
+      console.error("[Backend] Download proxy error:", err.message);
       if (!res.headersSent) {
         return res.status(204).end();
       }

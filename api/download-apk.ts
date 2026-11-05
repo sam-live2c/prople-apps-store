@@ -1,3 +1,4 @@
+
 const TRUSTED_ORIGIN_PATTERNS = [
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
   /^https:\/\/([a-z0-9-]+\.)?prople\.(co\.in|store)$/i,
@@ -534,6 +535,33 @@ export default async function handler(req: any, res: any) {
       return res.status(204).end();
     }
 
+    let mimeType = upstreamRes.headers.get('content-type') || 'application/octet-stream';
+    if (lowerName.endsWith('.apk') || lowerName.endsWith('.aab')) {
+      mimeType = 'application/vnd.android.package-archive';
+    } else if (lowerName.endsWith('.exe')) {
+      mimeType = 'application/x-msdownload';
+    } else if (lowerName.endsWith('.msi')) {
+      mimeType = 'application/x-msi';
+    } else if (lowerName.endsWith('.deb')) {
+      mimeType = 'application/vnd.debian.binary-package';
+    } else if (lowerName.endsWith('.rpm')) {
+      mimeType = 'application/x-redhat-package-manager';
+    } else if (lowerName.endsWith('.appimage') || lowerName.endsWith('.run') || lowerName.endsWith('.bin')) {
+      mimeType = 'application/x-executable';
+    } else if (lowerName.endsWith('.dmg')) {
+      mimeType = 'application/x-apple-diskimage';
+    } else if (lowerName.endsWith('.pkg')) {
+      mimeType = 'application/x-newton-compatible-pkg';
+    } else if (lowerName.endsWith('.ipa')) {
+      mimeType = 'application/x-itunes-ipa';
+    } else if (lowerName.endsWith('.tar.gz') || lowerName.endsWith('.tgz')) {
+      mimeType = 'application/gzip';
+    } else if (lowerName.endsWith('.zip')) {
+      mimeType = 'application/zip';
+    } else if (lowerName.endsWith('.7z')) {
+      mimeType = 'application/x-7z-compressed';
+    }
+
     try {
       if (upstreamRes.body) {
         await upstreamRes.body.cancel();
@@ -541,10 +569,7 @@ export default async function handler(req: any, res: any) {
     } catch {}
 
     // Universal Zero-Byte Directory Pointer Mode:
-    // Prople Store operates strictly as an intermediary directory pointer under safe harbor provisions.
-    // Zero binary bytes are buffered, stored, or streamed through this server.
-    // Clients receive an immediate 302 Found redirect directly to the verified upstream binary host (GitHub, Cloudflare R2, AWS S3, CDN, or VPS)
-    // with no-referrer to protect user privacy.
+    // Clients receive an immediate 302 Found redirect directly to the verified upstream binary host.
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Referrer-Policy', 'no-referrer');
