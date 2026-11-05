@@ -1331,7 +1331,7 @@ export default function AppDetailPage({
                     </button>
                     {showMenu && (
                       <div 
-                        className="absolute right-2 top-full mt-1.5 w-56 rounded-2xl shadow-2xl py-2 z-50 border border-neutral-200 dark:border-[#3c4043] bg-white dark:bg-[#1e1f22] text-neutral-900 dark:text-[#e3e3e3]"
+                        className="absolute right-2 top-full mt-1.5 w-56 rounded-2xl shadow-2xl py-2 z-50 bg-white dark:bg-[#1e1f22] text-neutral-900 dark:text-[#e3e3e3]"
                         style={{ backgroundColor: 'var(--theme-card, #1e1f22)', opacity: 1 }}
                       >
                         <button 
@@ -1426,7 +1426,7 @@ export default function AppDetailPage({
                   </button>
                   {showMenu && (
                     <div 
-                      className="absolute right-2 top-full mt-1.5 w-56 rounded-2xl shadow-2xl py-2 z-50 border border-neutral-200 dark:border-[#3c4043] bg-white dark:bg-[#1e1f22] text-neutral-900 dark:text-[#e3e3e3]"
+                      className="absolute right-2 top-full mt-1.5 w-56 rounded-2xl shadow-2xl py-2 z-50 bg-white dark:bg-[#1e1f22] text-neutral-900 dark:text-[#e3e3e3]"
                       style={{ backgroundColor: 'var(--theme-card, #1e1f22)', opacity: 1 }}
                     >
                       <button 
@@ -1539,7 +1539,7 @@ export default function AppDetailPage({
                 </button>
                 {showMenu && (
                   <div 
-                    className="absolute right-0 top-full mt-1.5 w-56 rounded-2xl shadow-2xl py-2 z-50 border border-neutral-200 dark:border-[#3c4043] bg-white dark:bg-[#1e1f22] text-neutral-900 dark:text-[#e3e3e3]"
+                    className="absolute right-0 top-full mt-1.5 w-56 rounded-2xl shadow-2xl py-2 z-50 bg-white dark:bg-[#1e1f22] text-neutral-900 dark:text-[#e3e3e3]"
                     style={{ backgroundColor: 'var(--theme-card, #1e1f22)', opacity: 1 }}
                   >
                     <button 
