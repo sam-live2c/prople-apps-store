@@ -31,6 +31,7 @@ import {
 } from '../utils/appMetricsAlgorithm';
 import { optimizeAppMediaForStorage } from '../utils/mediaUtils';
 import { safeFetchJson } from '../utils/safeFetch';
+import { formatReviewUserName } from '../utils/avatarUtils';
 
 export { formatDownloadCount, parseDownloadCount };
 
@@ -929,7 +930,7 @@ export function listenToAppReviews(appId: string, callback: (reviews: Review[]) 
         id: d.id,
         appId,
         userId: data.userId || 'u-anon',
-        userName: data.userName || 'Marketplace User',
+        userName: formatReviewUserName(data.userName || 'Marketplace User'),
         userAvatar: data.userAvatar || '',
         rating: data.rating || 5,
         date: data.date || 'Today',
@@ -1036,7 +1037,7 @@ export async function addAppReviewToFirestore(appId: string, review: Omit<Review
       appName: review.appName || appDetailsMock[appId]?.name || 'App',
       appIcon: review.appIcon || appDetailsMock[appId]?.iconUrl || '',
       userId: review.userId || currentAuth.uid,
-      userName: review.userName,
+      userName: formatReviewUserName(review.userName),
       userEmail: (review as any).userEmail || currentAuth.email || '',
       userAvatar: review.userAvatar || '',
       rating: review.rating,

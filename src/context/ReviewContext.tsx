@@ -23,6 +23,7 @@ import {
 } from '../services/firestoreNotificationService';
 import { AdminModerationService } from '../services/adminModerationService';
 import { calculateAppRatingAndReviews } from '../utils/appMetricsAlgorithm';
+import { formatReviewUserName } from '../utils/avatarUtils';
 
 interface ReviewWithAppInfo extends Review {
   appId: string;
@@ -66,6 +67,7 @@ const getInitialReviewsMap = (): Record<string, Review[]> => {
     if (app.id && app.reviews) {
       map[app.id] = app.reviews.map(r => ({
         ...r,
+        userName: formatReviewUserName(r.userName),
         appId: app.id,
         appName: app.name,
         appIcon: app.iconUrl,
@@ -92,7 +94,16 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-          return parsed;
+          const sanitized: Record<string, Review[]> = {};
+          Object.keys(parsed).forEach(k => {
+            if (Array.isArray(parsed[k])) {
+              sanitized[k] = parsed[k].map((r: Review) => ({
+                ...r,
+                userName: formatReviewUserName(r.userName)
+              }));
+            }
+          });
+          return sanitized;
         }
       }
     } catch (e) {
@@ -177,7 +188,10 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
       activeListenersRef.current[appId] = listenToAppReviews(appId, (firestoreReviews) => {
         setReviewsMap(prev => ({
           ...prev,
-          [appId]: firestoreReviews || []
+          [appId]: (firestoreReviews || []).map(r => ({
+            ...r,
+            userName: formatReviewUserName(r.userName)
+          }))
         }));
       });
     }
@@ -314,6 +328,7 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     const sanitizedText = (reviewData.text || '').trim().slice(0, MAX_REVIEW_CHARACTERS);
     const newReview: Review = {
       ...reviewData,
+      userName: formatReviewUserName(reviewData.userName),
       text: sanitizedText,
       id: reviewId,
       appId,

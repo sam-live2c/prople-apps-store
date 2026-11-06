@@ -17,6 +17,7 @@ import {
 } from '../firebase';
 import { NotificationItem, NotificationCategory, AppDetails, UserProfile } from '../types';
 import { appDetailsMock } from '../data';
+import { formatReviewUserName } from '../utils/avatarUtils';
 
 const NOTIFS_COLLECTION = 'notifications';
 
@@ -773,7 +774,7 @@ export async function notifyPublisherNewReview(
     }
 
     const notifId = `notif-rev-${appId}-${Date.now()}`;
-    const cleanUser = review.userName || 'A user';
+    const cleanUser = formatReviewUserName(review.userName) || 'A user';
     const snippet = review.text ? (review.text.length > 70 ? review.text.substring(0, 67) + '...' : review.text) : 'Left a rating';
     const title = `⭐ New ${review.rating}★ Review for ${appName}`;
     const message = `${cleanUser} rated ${review.rating}★: "${snippet}"`;
@@ -837,7 +838,7 @@ export async function notifyPublisherReviewUpdated(
     }
 
     const notifId = `notif-rev-upd-${appId}-${Date.now()}`;
-    const cleanUser = review.userName || 'A reviewer';
+    const cleanUser = formatReviewUserName(review.userName) || 'A reviewer';
     const snippet = review.text ? (review.text.length > 70 ? review.text.substring(0, 67) + '...' : review.text) : 'Updated rating';
     const title = `Review Updated: ${appName}`;
     const message = `${cleanUser} updated their review to ${review.rating}★: "${snippet}"`;
@@ -892,7 +893,7 @@ export async function notifyUserReviewReply(
       category: 'review_reply',
       targetType: 'user',
       targetUid: review.userId,
-      targetUserName: review.userName,
+      targetUserName: formatReviewUserName(review.userName),
       actionType: 'app_detail',
       actionLabel: 'View developer reply',
       isUnread: true,
@@ -932,7 +933,7 @@ export async function notifyUserReviewHelpful(params: {
       category: 'review',
       targetType: 'user',
       targetUid: params.userId || 'u-me',
-      targetUserName: params.userName || undefined,
+      targetUserName: params.userName ? formatReviewUserName(params.userName) : undefined,
       targetEmail: params.userEmail || undefined,
       actionType: 'app_detail',
       actionLabel: 'View review',

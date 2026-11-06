@@ -103,3 +103,17 @@ export function getFriendlyDisplayName(user?: {
 
   return 'User';
 }
+
+/**
+ * Formats and cleans the name of a user on reviews.
+ * By default, removes any trailing dot(s) and trailing whitespace at the end of the name
+ * (e.g. "John D." -> "John D", "Sarah M." -> "Sarah M", "User." -> "User").
+ */
+export function formatReviewUserName(name?: string | null): string {
+  if (!name || typeof name !== 'string') return 'User';
+  const trimmed = name.trim();
+  if (!trimmed) return 'User';
+  // Strip trailing dots/periods and trailing whitespace
+  const cleaned = trimmed.replace(/[\.\s]+$/, '').trim();
+  return cleaned || 'User';
+}

@@ -14,7 +14,7 @@ import MediaGalleryLightbox from './MediaUpload/MediaGalleryLightbox';
 import ConfirmationDialog from './ConfirmationDialog';
 import { usePreserveScroll } from '../services/scrollManager';
 import UserAvatar from './UserAvatar';
-import { getFriendlyDisplayName } from '../utils/avatarUtils';
+import { getFriendlyDisplayName, formatReviewUserName } from '../utils/avatarUtils';
 
 interface WriteReviewPageProps {
   app: AppDetails;
@@ -179,7 +179,7 @@ export default function WriteReviewPage({
       // Post new review for current app
       addReview(targetApp.id, {
         userId: user?.uid || 'u-me',
-        userName: user?.displayName || 'User',
+        userName: formatReviewUserName(user?.displayName || user?.publisherName || getFriendlyDisplayName(user) || 'User'),
         userEmail: user?.email || undefined,
         userAvatar: user?.photoURL || undefined,
         rating,
@@ -283,7 +283,7 @@ export default function WriteReviewPage({
             size="md"
           />
           <div className="flex flex-col">
-            <span className="text-sm font-medium text-theme-text">{user?.displayName || user?.publisherName || getFriendlyDisplayName(user)}</span>
+            <span className="text-sm font-medium text-theme-text">{formatReviewUserName(user?.displayName || user?.publisherName || getFriendlyDisplayName(user))}</span>
             <span className="text-[11px] text-theme-text-muted">Reviews are public and include your Google account details</span>
           </div>
         </div>

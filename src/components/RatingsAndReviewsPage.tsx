@@ -18,6 +18,7 @@ import { useNavigation } from '../context/NavigationContext';
 import { useStoreConfig } from '../context/StoreConfigContext';
 import { usePreserveScroll } from '../services/scrollManager';
 import StoreCircleLoader from './StoreCircleLoader';
+import { formatReviewUserName } from '../utils/avatarUtils';
 
 function ReviewNotificationRow({
   review,
@@ -129,7 +130,7 @@ function ReviewNotificationRow({
                 <span className="text-[10px] text-amber-400">★</span>
               </span>
               <span className="shrink-0">•</span>
-              <span className="truncate">{review.userName || 'User Review'}</span>
+              <span className="truncate">{formatReviewUserName(review.userName)}</span>
               {review.media && review.media.length > 0 && (
                 <span className="shrink-0 text-blue-400 flex items-center gap-0.5">
                   • <Camera className="w-3 h-3 inline" /> {review.media.length}

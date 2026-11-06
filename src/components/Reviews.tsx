@@ -10,6 +10,7 @@ import ConfirmationDialog from './ConfirmationDialog';
 import { calculateAppRatingAndReviews } from '../utils/appMetricsAlgorithm';
 import { AdminModerationService } from '../services/adminModerationService';
 import UserAvatar from './UserAvatar';
+import { formatReviewUserName } from '../utils/avatarUtils';
 
 interface ReviewsProps {
   app: AppDetails;
@@ -42,11 +43,13 @@ export function Reviews({ app, onSeeAllReviews, onWriteReview }: ReviewsProps) {
       if (review.userId && (review.userId === user.uid || (user.uid && review.userId.toLowerCase() === user.uid.toLowerCase()))) {
         return true;
       }
-      if (user.displayName && review.userName && review.userName.trim().toLowerCase() === user.displayName.trim().toLowerCase()) {
+      const revName = formatReviewUserName(review.userName).toLowerCase();
+      const myDisplay = formatReviewUserName(user.displayName).toLowerCase();
+      if (myDisplay && revName === myDisplay) {
         return true;
       }
     }
-    return review.userId === 'u-me' || review.userName === 'You';
+    return review.userId === 'u-me' || review.userName === 'You' || formatReviewUserName(review.userName) === 'You';
   };
 
   const handleDeleteReview = async (reviewId: string) => {
@@ -245,10 +248,10 @@ export function Reviews({ app, onSeeAllReviews, onWriteReview }: ReviewsProps) {
                 <div className="flex items-center gap-3 min-w-0">
                   <UserAvatar
                     photoURL={review.userAvatar}
-                    name={review.userName}
+                    name={formatReviewUserName(review.userName)}
                     size="sm"
                   />
-                  <span className="text-[14px] font-medium text-theme-text truncate">{review.userName}</span>
+                  <span className="text-[14px] font-medium text-theme-text truncate">{formatReviewUserName(review.userName)}</span>
                 </div>
                 <div className="relative shrink-0">
                   <button 

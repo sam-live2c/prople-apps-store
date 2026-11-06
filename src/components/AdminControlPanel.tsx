@@ -69,6 +69,7 @@ import {
   deleteBroadcastNotification,
   listenToStoreNotifications
 } from '../services/firestoreNotificationService';
+import { formatReviewUserName } from '../utils/avatarUtils';
 import { AppDetails, NotificationItem, NotificationCategory } from '../types';
 import ConfirmationDialog from './ConfirmationDialog';
 import GlobalNoticeDetailModal from './GlobalNoticeDetailModal';
@@ -289,7 +290,7 @@ function ReviewReportNotificationRow({
               ))}
             </div>
             <span>•</span>
-            <span className="truncate">{report.userName || 'User Review'}</span>
+            <span className="truncate">{formatReviewUserName(report.userName)}</span>
             {isPending && (
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0 inline-block ml-1" title="Pending review report" />
             )}
@@ -1475,7 +1476,7 @@ export default function AdminControlPanel({
   const handleDismissReviewReport = (reviewId: string) => {
     const report = reviewReports.find(r => r.reviewId === reviewId);
     const targetApp = report?.appName || 'App';
-    const targetUser = report?.userName || 'User';
+    const targetUser = formatReviewUserName(report?.userName);
     setConfirmAction({
       isOpen: true,
       title: 'Remove Review Report?',
@@ -1493,10 +1494,11 @@ export default function AdminControlPanel({
 
   // Delete review for Community Guidelines & notify author on phone & notification centre
   const handleDeleteReviewForGuidelines = (report: ReviewReportItem) => {
+    const cleanUserName = formatReviewUserName(report.userName);
     setConfirmAction({
       isOpen: true,
       title: 'Delete review for Community Guidelines?',
-      description: `Delete this review by "${report.userName}" on "${report.appName}". The author will receive a direct notification on their device and in their Notification Centre with the reason.`,
+      description: `Delete this review by "${cleanUserName}" on "${report.appName}". The author will receive a direct notification on their device and in their Notification Centre with the reason.`,
       confirmLabel: 'Delete & Notify Author',
       isDestructive: true,
       onConfirm: () => {
@@ -1505,7 +1507,7 @@ export default function AdminControlPanel({
           appName: report.appName,
           reason,
           targetUser: {
-            name: report.userName,
+            name: cleanUserName,
             email: report.userEmail
           }
         });

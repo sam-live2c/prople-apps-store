@@ -3368,7 +3368,10 @@ async function startServer() {
         });
       } catch {}
 
-      const reviews = Array.from(reviewsMap.values());
+      const reviews = Array.from(reviewsMap.values()).map(r => ({
+        ...r,
+        userName: (r.userName ? String(r.userName).trim().replace(/[\.\s]+$/, '') : '') || 'Marketplace User'
+      }));
       reviews.sort((a, b) => {
         const dateA = new Date(a.date || a.createdAt).getTime() || 0;
         const dateB = new Date(b.date || b.createdAt).getTime() || 0;
@@ -3498,13 +3501,15 @@ async function startServer() {
       const reviewId = review.id || `rev-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const nowIso = new Date().toISOString();
 
+      const rawUserName = review.userName ? String(review.userName).trim().replace(/[\.\s]+$/, '') : '';
+
       const cleanReview = sanitizeObject({
         id: reviewId,
         appId,
         appName: review.appName || 'App',
         appIcon: review.appIcon || '',
         userId: userId || review.userId || 'u-user',
-        userName: review.userName || 'Marketplace User',
+        userName: rawUserName || 'Marketplace User',
         userEmail: userEmail || review.userEmail || '',
         userAvatar: review.userAvatar || '',
         rating: typeof review.rating === 'number' ? review.rating : 5,
@@ -3589,6 +3594,10 @@ async function startServer() {
         appId,
         updatedAt: new Date().toISOString()
       });
+
+      if (updatedReview.userName) {
+        updatedReview.userName = String(updatedReview.userName).trim().replace(/[\.\s]+$/, '') || 'Marketplace User';
+      }
 
       if (existingIdx >= 0) {
         currentList[existingIdx] = updatedReview;
