@@ -316,8 +316,8 @@ export class RecommendationService {
 
         // 5. Bayesian Rating Quality Boost
         const rating = app.rating ?? fullApp?.rating ?? 0;
-        const ratingsCount = app.ratingsCount ?? fullApp?.ratingsCount ?? (app.downloadsCount ? 10 : 1);
-        if (rating > 0) {
+        const ratingsCount = app.ratingsCount ?? fullApp?.ratingsCount ?? 0;
+        if (rating > 0 && ratingsCount > 0) {
           const bayesianRating = calculateBayesianRating(rating, ratingsCount);
           score += bayesianRating * 8;
         }

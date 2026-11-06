@@ -237,7 +237,7 @@ function ForYouView({
     }
   };
 
-  if (isLoadingApps || !hasInitialSyncCompleted || isPullRefreshing) {
+  if (isLoadingApps || !hasInitialSyncCompleted || isPullRefreshing || (allCatalogApps.length === 0 && !hasInitialSyncCompleted)) {
     return (
       <PullToRefresh onRefresh={refreshCatalogue} isRefreshing={isPullRefreshing} earlyDismissDurationMs={360} dismissBeforeEnd={true}>
         <HomeSkeleton

@@ -11,12 +11,6 @@ const CACHE_TTL_MS = 60 * 1000;
 
 let cachedProductionTemplate: string | null = null;
 
-interface FirebaseServerConfig {
-  projectId: string;
-  firestoreDatabaseId: string;
-  isExampleConfig: boolean;
-}
-
 function getSafeModuleDir(): string | null {
   try {
     return path.dirname(fileURLToPath(import.meta.url));
@@ -25,49 +19,7 @@ function getSafeModuleDir(): string | null {
   }
 }
 
-function getServerFirebaseConfig(): FirebaseServerConfig {
-  let fileConfig: any = {};
-  try {
-    const candidateConfigPaths = [
-      path.join(process.cwd(), 'firebase-applet-config.json'),
-    ];
-    const modDir = getSafeModuleDir();
-    if (modDir) {
-      candidateConfigPaths.push(path.join(modDir, '..', 'firebase-applet-config.json'));
-    }
-    for (const p of candidateConfigPaths) {
-      if (fs.existsSync(p)) {
-        fileConfig = JSON.parse(fs.readFileSync(p, 'utf-8'));
-        break;
-      }
-    }
-  } catch {}
 
-  const isReal = (val?: string) =>
-    Boolean(
-      val &&
-      typeof val === 'string' &&
-      val.trim().length > 0 &&
-      !val.includes('example') &&
-      !val.includes('Placeholder') &&
-      !val.includes('0000000000')
-    );
-
-  const apiKey = process.env.FIREBASE_API_KEY || (isReal(fileConfig.apiKey) ? fileConfig.apiKey : '');
-  const projectId = process.env.FIREBASE_PROJECT_ID || (isReal(fileConfig.projectId) ? fileConfig.projectId : '');
-  const firestoreDatabaseId =
-    process.env.FIRESTORE_DATABASE_ID ||
-    process.env.FIREBASE_DATABASE_ID ||
-    (isReal(fileConfig.firestoreDatabaseId) ? fileConfig.firestoreDatabaseId : '(default)');
-
-  const isExampleConfig = !isReal(apiKey) || !isReal(projectId);
-
-  return {
-    projectId: projectId || 'example-prople-store',
-    firestoreDatabaseId: firestoreDatabaseId || '(default)',
-    isExampleConfig,
-  };
-}
 
 function escapeHtml(str: string): string {
   if (!str) return '';

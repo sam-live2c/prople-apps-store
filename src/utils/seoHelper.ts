@@ -31,6 +31,27 @@ export function getInitialHydratedApp(): any | null {
   return null;
 }
 
+export function getInitialHydratedCatalog(): Record<string, any> | null {
+  if (typeof window === 'undefined') return null;
+  if ((window as any).__INITIAL_CATALOG__) {
+    return (window as any).__INITIAL_CATALOG__;
+  }
+  try {
+    if (typeof document !== 'undefined') {
+      const el = document.getElementById('prople-initial-catalog');
+      const rawText = el?.textContent?.trim();
+      if (rawText) {
+        const parsed = JSON.parse(rawText);
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+          (window as any).__INITIAL_CATALOG__ = parsed;
+          return parsed;
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
 function setMetaTag(nameOrProperty: string, content: string, isProperty = false) {
   const attribute = isProperty ? 'property' : 'name';
   let element = document.querySelector(`meta[${attribute}="${nameOrProperty}"]`);

@@ -10,7 +10,7 @@ import { ReviewProvider } from './context/ReviewContext';
 import { NavigationProvider } from './context/NavigationContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
-import './firebase';
+import './supabaseClient';
 
 // Early theme initialization from stored preference
 try {
@@ -86,10 +86,6 @@ if ('serviceWorker' in navigator && typeof window !== 'undefined') {
 
 const rootElement = document.getElementById('root');
 if (rootElement) {
-  // Clear any pre-rendered crawler shell markup before React client mounts
-  if (rootElement.hasChildNodes()) {
-    rootElement.innerHTML = '';
-  }
   createRoot(rootElement).render(
     <StrictMode>
       <ErrorBoundary>

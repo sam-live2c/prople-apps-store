@@ -372,7 +372,7 @@ export function injectAppSeoIntoHtml(
             </p>
             
             <div style="display: flex; align-items: center; gap: 16px; font-size: 13px; color: #cbd5e1; flex-wrap: wrap;">
-              ${ratingVal ? `<span style="font-weight: 600; color: #f3f4f6;">${ratingVal.toFixed(1)} &#9733; <span style="font-weight: 400; color: #9aa0a6;">(${reviewsCountVal || '10+'} reviews)</span></span>` : '<span style="color: #9aa0a6;">Verified Listing</span>'}
+              ${ratingVal && reviewsCountVal ? `<span style="font-weight: 600; color: #f3f4f6;">${ratingVal.toFixed(1)} &#9733; <span style="font-weight: 400; color: #9aa0a6;">(${reviewsCountVal} reviews)</span></span>` : '<span style="color: #9aa0a6;">Verified Listing</span>'}
               <span>&bull;</span>
               <span>${downloads} Downloads</span>
               <span>&bull;</span>
@@ -619,6 +619,19 @@ export function injectPlatformSeoIntoHtml(
   const title = `${platformName} Applications & Software — Free Verified Downloads | Prople Store`;
   const desc = escapeHtml(`Discover, search, and download top-rated ${platformName} applications, packages, and tools on Prople Store. Verified malware-free digital distribution.`);
 
+  const catalogMap: Record<string, any> = {};
+  for (const app of platformApps) {
+    if (app && app.id) {
+      catalogMap[app.id] = {
+        ...app,
+        downloads: app.downloads || '0+',
+      };
+      if (app.slug) {
+        catalogMap[app.slug] = catalogMap[app.id];
+      }
+    }
+  }
+
   const headInject = `
     <!-- Platform SEO -->
     <title>${title}</title>
@@ -632,6 +645,9 @@ export function injectPlatformSeoIntoHtml(
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="${title}" />
     <meta name="twitter:description" content="${desc}" />
+    <script id="prople-initial-catalog" type="application/json">
+    ${safeJsonLd(catalogMap)}
+    </script>
   `;
 
   const appsListHtml = platformApps.length > 0 ? `
@@ -684,6 +700,19 @@ export function injectHomeSeoIntoHtml(
 
   const topApps = allApps.slice(0, 36);
 
+  const catalogMap: Record<string, any> = {};
+  for (const app of allApps) {
+    if (app && app.id) {
+      catalogMap[app.id] = {
+        ...app,
+        downloads: app.downloads || '0+',
+      };
+      if (app.slug) {
+        catalogMap[app.slug] = catalogMap[app.id];
+      }
+    }
+  }
+
   const itemListJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'ItemList',
@@ -718,6 +747,9 @@ export function injectHomeSeoIntoHtml(
     <meta name="twitter:title" content="${title}" />
     <meta name="twitter:description" content="${desc}" />
     <meta name="twitter:image" content="${baseUrl}/logo.png" />
+    <script id="prople-initial-catalog" type="application/json">
+    ${safeJsonLd(catalogMap)}
+    </script>
     <script type="application/ld+json">
     ${safeJsonLd(itemListJsonLd)}
     </script>

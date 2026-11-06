@@ -59,29 +59,9 @@ const LOCAL_STORAGE_REVIEWS_KEY = 'appmarket_reviews_store_v5';
 const LOCAL_STORAGE_VOTES_KEY = 'appmarket_user_votes_v2';
 const LOCAL_STORAGE_FLAGGED_KEY = 'appmarket_flagged_reviews_v2';
 
-// Seed initial reviews map from mock data as instant fallback
+// Seed initial reviews map (starts clean without phantom placeholder reviews)
 const getInitialReviewsMap = (): Record<string, Review[]> => {
-  const map: Record<string, Review[]> = {};
-  
-  Object.values(appDetailsMock).forEach((app) => {
-    if (app.id && app.reviews) {
-      map[app.id] = app.reviews.map(r => ({
-        ...r,
-        userName: formatReviewUserName(r.userName),
-        appId: app.id,
-        appName: app.name,
-        appIcon: app.iconUrl,
-        reply: r.reply ? {
-          ...r.reply,
-          authorName: app.developer || 'Developer',
-          isVerifiedPublisher: true,
-          authorRole: 'Verified Developer'
-        } : undefined
-      }));
-    }
-  });
-
-  return map;
+  return {};
 };
 
 export function ReviewProvider({ children }: { children: ReactNode }) {
@@ -484,10 +464,14 @@ export function ReviewProvider({ children }: { children: ReactNode }) {
     const updatedReviewsList = (reviewsMap[appId] || []).filter(r => r.id !== reviewId);
     setReviewsMap(prev => {
       const existing = prev[appId] || [];
-      return {
+      const nextMap = {
         ...prev,
         [appId]: existing.filter(r => r.id !== reviewId)
       };
+      try {
+        localStorage.setItem(LOCAL_STORAGE_REVIEWS_KEY, JSON.stringify(nextMap));
+      } catch {}
+      return nextMap;
     });
 
     // Realtime calculation and immediate storefront broadcast

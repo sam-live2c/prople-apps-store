@@ -33,45 +33,63 @@ export interface RatingCalculationResult {
  * Dynamically computes ratings, total reviews, and star breakdown
  */
 export function calculateAppRatingAndReviews(
-  reviewsList: Array<{ rating?: number }> = [],
+  reviewsList?: Array<{ rating?: number }>,
   fallbackRating?: number,
   fallbackRatingsCount?: number,
   fallbackReviewsCountStr?: string,
   fallbackBreakdown?: Record<number, number>
 ): RatingCalculationResult {
-  const count = Array.isArray(reviewsList) ? reviewsList.length : 0;
+  // If an explicit reviewsList array is provided
+  if (Array.isArray(reviewsList)) {
+    const count = reviewsList.length;
+    if (count > 0) {
+      const starCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+      let sum = 0;
 
-  if (count > 0) {
-    const starCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    let sum = 0;
+      for (const r of reviewsList) {
+        const raw = Number(r.rating);
+        const star = Math.min(5, Math.max(1, Math.round(isNaN(raw) ? 5 : raw)));
+        starCounts[star] = (starCounts[star] || 0) + 1;
+        sum += (isNaN(raw) ? 5 : raw);
+      }
 
-    for (const r of reviewsList) {
-      const raw = Number(r.rating);
-      const star = Math.min(5, Math.max(1, Math.round(isNaN(raw) ? 5 : raw)));
-      starCounts[star] = (starCounts[star] || 0) + 1;
-      sum += (isNaN(raw) ? 5 : raw);
+      const avg = Math.round((sum / count) * 10) / 10;
+      const breakdown: Record<number, StarBreakdownItem> = {
+        5: { count: starCounts[5] || 0, percentage: Math.round(((starCounts[5] || 0) / count) * 100) },
+        4: { count: starCounts[4] || 0, percentage: Math.round(((starCounts[4] || 0) / count) * 100) },
+        3: { count: starCounts[3] || 0, percentage: Math.round(((starCounts[3] || 0) / count) * 100) },
+        2: { count: starCounts[2] || 0, percentage: Math.round(((starCounts[2] || 0) / count) * 100) },
+        1: { count: starCounts[1] || 0, percentage: Math.round(((starCounts[1] || 0) / count) * 100) },
+      };
+
+      return {
+        averageRating: avg,
+        averageRatingFormatted: avg.toFixed(1),
+        totalReviews: count,
+        reviewsCountFormatted: formatReviewsCountText(count),
+        isRated: true,
+        breakdown
+      };
     }
 
-    const avg = Math.round((sum / count) * 10) / 10;
-    const breakdown: Record<number, StarBreakdownItem> = {
-      5: { count: starCounts[5] || 0, percentage: Math.round(((starCounts[5] || 0) / count) * 100) },
-      4: { count: starCounts[4] || 0, percentage: Math.round(((starCounts[4] || 0) / count) * 100) },
-      3: { count: starCounts[3] || 0, percentage: Math.round(((starCounts[3] || 0) / count) * 100) },
-      2: { count: starCounts[2] || 0, percentage: Math.round(((starCounts[2] || 0) / count) * 100) },
-      1: { count: starCounts[1] || 0, percentage: Math.round(((starCounts[1] || 0) / count) * 100) },
-    };
-
+    // Explicit empty reviews list -> app has 0 reviews and is unrated
     return {
-      averageRating: avg,
-      averageRatingFormatted: avg.toFixed(1),
-      totalReviews: count,
-      reviewsCountFormatted: formatReviewsCountText(count),
-      isRated: true,
-      breakdown
+      averageRating: 0,
+      averageRatingFormatted: '—',
+      totalReviews: 0,
+      reviewsCountFormatted: '0 reviews',
+      isRated: false,
+      breakdown: {
+        5: { count: 0, percentage: 0 },
+        4: { count: 0, percentage: 0 },
+        3: { count: 0, percentage: 0 },
+        2: { count: 0, percentage: 0 },
+        1: { count: 0, percentage: 0 },
+      }
     };
   }
 
-  // If no reviews array but we have explicit recorded ratings in document
+  // If no reviews array was passed, check document recorded fallback count
   if (typeof fallbackRatingsCount === 'number' && fallbackRatingsCount > 0 && typeof fallbackRating === 'number' && fallbackRating > 0) {
     const avg = Math.round(fallbackRating * 10) / 10;
     const b5 = fallbackBreakdown?.[5] || 0;

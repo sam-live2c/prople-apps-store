@@ -757,8 +757,8 @@ export function scoreAppForSearch(
   }
 
   const rawRating = app.rating ?? fullApp?.rating ?? 0;
-  const ratingsCount = app.ratingsCount ?? fullApp?.ratingsCount ?? (downloads > 50 ? 8 : 1);
-  if (rawRating > 0) {
+  const ratingsCount = app.ratingsCount ?? fullApp?.ratingsCount ?? 0;
+  if (rawRating > 0 && ratingsCount > 0) {
     const bayesianRating = calculateBayesianRating(rawRating, ratingsCount);
     score += bayesianRating * 12;
   }

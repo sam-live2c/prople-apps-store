@@ -576,7 +576,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getRedirectResult(auth)
       .then(async (redirectCred) => {
         if (redirectCred?.user) {
-          const isGithub = redirectCred.providerId === 'github.com' || redirectCred.user.providerData.some(p => p.providerId === 'github.com');
+          const providerData = Array.isArray(redirectCred.user?.providerData) ? redirectCred.user.providerData : [];
+          const isGithub = redirectCred.providerId === 'github.com' || providerData.some((p: any) => p?.providerId === 'github.com');
           if (isGithub) {
             await processGithubCredential(redirectCred);
           }

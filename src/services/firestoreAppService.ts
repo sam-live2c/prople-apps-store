@@ -72,13 +72,13 @@ export async function syncAppRatingsAndReviews(appId: string, knownReviews?: Rev
     const reviews = Array.from(reviewsMap.values());
     const existingMock = appDetailsMock[appId];
 
-    // Calculate rating using reviews, or fall back to existing non-zero values if reviews query returned empty
+    // Calculate rating using reviews; when reviews list is empty, accurately drop to 0
     const calculation = calculateAppRatingAndReviews(
       reviews,
-      existingMock?.rating,
-      existingMock?.ratingsCount,
-      existingMock?.reviewsCount,
-      existingMock?.ratingBreakdown
+      reviews.length === 0 ? 0 : existingMock?.rating,
+      reviews.length === 0 ? 0 : existingMock?.ratingsCount,
+      reviews.length === 0 ? '0 reviews' : existingMock?.reviewsCount,
+      reviews.length === 0 ? { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 } : existingMock?.ratingBreakdown
     );
 
     const avgRating = calculation.averageRating;
@@ -1110,17 +1110,37 @@ export async function updateAppReviewInFirestore(appId: string, reviewId: string
  */
 export async function deleteAppReviewFromFirestore(appId: string, reviewId: string): Promise<void> {
   const currentAuth = getCurrentAuthInfo();
+  let idToken = '';
+  try {
+    idToken = (await auth.currentUser?.getIdToken?.()) || '';
+  } catch {}
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
 
   // 1. Backend delete endpoint
   try {
-    await safeFetchJson(`/api/apps/${encodeURIComponent(appId)}/reviews/${encodeURIComponent(reviewId)}`, {
+    const res = await safeFetchJson<{ success: boolean; appRating?: number; ratingsCount?: number; reviewsCount?: string }>(`/api/apps/${encodeURIComponent(appId)}/reviews/${encodeURIComponent(reviewId)}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         userId: currentAuth.uid,
-        userEmail: currentAuth.email
+        userEmail: currentAuth.email,
+        idToken
       })
     });
+    if (res.ok && res.data?.success && typeof res.data.appRating === 'number') {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('app:rating:updated', {
+          detail: {
+            appId,
+            rating: res.data.appRating,
+            ratingsCount: res.data.ratingsCount ?? 0,
+            reviewsCount: res.data.reviewsCount ?? '0 reviews'
+          }
+        }));
+      }
+    }
   } catch {}
 
   // 2. Client delete fallback

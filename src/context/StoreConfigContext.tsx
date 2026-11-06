@@ -14,7 +14,7 @@ import { clearAllSectionScrolls } from '../services/sectionScrollMemoryService';
 import { AdminModerationService } from '../services/adminModerationService';
 import { RecommendationService } from '../services/recommendationService';
 import { safeFetchJson } from '../utils/safeFetch';
-import { getInitialHydratedApp } from '../utils/seoHelper';
+import { getInitialHydratedApp, getInitialHydratedCatalog } from '../utils/seoHelper';
 
 interface StoreConfigContextType {
   banners: HeroBannerConfig[];
@@ -143,13 +143,17 @@ function overlayCurrentSavedUserPublisherName(catalog: Record<string, AppDetails
 }
 
 export function StoreConfigProvider({ children }: { children: ReactNode }) {
-  // Instant cache hydration from window.__INITIAL_APP__ or sessionStorage/localStorage prevents any blank or empty flash
+  // Instant cache hydration from window.__INITIAL_CATALOG__, __INITIAL_APP__, or sessionStorage/localStorage prevents any blank or empty flash
   const [apps, setApps] = useState<Record<string, AppDetails>>(() => {
     const seedApps: Record<string, AppDetails> = {};
-    const init = getInitialHydratedApp();
-    if (init && init.id) {
-      seedApps[init.id] = init;
-      if (init.slug) seedApps[init.slug] = init;
+    const initApp = getInitialHydratedApp();
+    if (initApp && initApp.id) {
+      seedApps[initApp.id] = initApp;
+      if (initApp.slug) seedApps[initApp.slug] = initApp;
+    }
+    const initCatalog = getInitialHydratedCatalog();
+    if (initCatalog && typeof initCatalog === 'object' && Object.keys(initCatalog).length > 0) {
+      return { ...seedApps, ...initCatalog };
     }
     try {
       const cached = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(ACTIVE_CATALOG_STORAGE_KEY)) ||
@@ -167,6 +171,10 @@ export function StoreConfigProvider({ children }: { children: ReactNode }) {
     if (getInitialHydratedApp()) {
       return false;
     }
+    const initCatalog = getInitialHydratedCatalog();
+    if (initCatalog && typeof initCatalog === 'object' && Object.keys(initCatalog).length > 0) {
+      return false;
+    }
     try {
       const cached = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(ACTIVE_CATALOG_STORAGE_KEY)) ||
                      (typeof localStorage !== 'undefined' && localStorage.getItem(ACTIVE_CATALOG_STORAGE_KEY));
@@ -181,6 +189,10 @@ export function StoreConfigProvider({ children }: { children: ReactNode }) {
   });
   const [hasInitialSyncCompleted, setHasInitialSyncCompleted] = useState<boolean>(() => {
     if (getInitialHydratedApp()) {
+      return true;
+    }
+    const initCatalog = getInitialHydratedCatalog();
+    if (initCatalog && typeof initCatalog === 'object' && Object.keys(initCatalog).length > 0) {
       return true;
     }
     try {
@@ -329,8 +341,16 @@ export function StoreConfigProvider({ children }: { children: ReactNode }) {
       }
       const count = Object.keys(freshApps).length;
       
+      // If liveApps is empty and we haven't loaded data yet, don't prematurely wipe state or stop loading
+      if (count === 0 && !hasLoadedFirstData) {
+        return;
+      }
+      
       // Update in-memory apps state: Firestore snapshot is the authoritative source of record
-      setApps(() => {
+      setApps((prev) => {
+        if (count === 0 && Object.keys(prev).length > 0) {
+          return prev;
+        }
         try {
           if (typeof sessionStorage !== 'undefined') {
             sessionStorage.setItem(ACTIVE_CATALOG_STORAGE_KEY, JSON.stringify(freshApps));
@@ -821,9 +841,9 @@ export function StoreConfigProvider({ children }: { children: ReactNode }) {
       return true;
     }).map((b) => {
       const appObj = b.appId ? apps[b.appId] : (Object.values(apps) as AppDetails[]).find(a => a.name?.toLowerCase() === b.appName?.toLowerCase());
-      const liveRating = (appObj?.rating && appObj.rating > 0) ? appObj.rating : b.appRating;
-      const liveRatingsCount = (appObj?.ratingsCount && appObj.ratingsCount > 0) ? appObj.ratingsCount : b.appRatingsCount;
-      const liveReviewsCount = (appObj?.reviewsCount && (Number(appObj.reviewsCount) > 0 || parseInt(String(appObj.reviewsCount), 10) > 0)) ? appObj.reviewsCount : b.appReviewsCount;
+      const liveRating = typeof appObj?.rating === 'number' ? appObj.rating : b.appRating;
+      const liveRatingsCount = typeof appObj?.ratingsCount === 'number' ? appObj.ratingsCount : b.appRatingsCount;
+      const liveReviewsCount = appObj?.reviewsCount !== undefined ? appObj.reviewsCount : b.appReviewsCount;
       const liveDeveloper = appObj?.developer || b.appDeveloper;
 
       return {

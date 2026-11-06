@@ -115,11 +115,12 @@ export default async function handler(req: any, res: any) {
 
     if (!existing) {
       cleanDoc.createdAt = new Date().toISOString();
-      cleanDoc.rating = typeof appPayload.rating === 'number' ? appPayload.rating : 5.0;
-      cleanDoc.ratingsCount = typeof appPayload.ratingsCount === 'number' ? appPayload.ratingsCount : 1;
-      cleanDoc.reviewsCount = appPayload.reviewsCount || '1 review';
-      cleanDoc.downloadsCount = typeof appPayload.downloadsCount === 'number' ? appPayload.downloadsCount : 1;
-      cleanDoc.downloads = appPayload.downloads || '1+';
+      cleanDoc.rating = typeof appPayload.rating === 'number' ? appPayload.rating : 0.0;
+      cleanDoc.ratingsCount = typeof appPayload.ratingsCount === 'number' ? appPayload.ratingsCount : 0;
+      cleanDoc.reviewsCount = appPayload.reviewsCount || '0 reviews';
+      cleanDoc.downloadsCount = typeof appPayload.downloadsCount === 'number' ? appPayload.downloadsCount : 0;
+      cleanDoc.downloads = appPayload.downloads || '0+';
+      cleanDoc.ratingBreakdown = appPayload.ratingBreakdown || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     }
 
     const success = await upsertAppToSupabase(cleanDoc);
